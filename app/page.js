@@ -854,7 +854,7 @@ function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick })
 // ============================================================================
 function RegisterView({ centre, onDrill, refreshTick }) {
   const [rows, setRows] = useState([])
-  const [from, setFrom] = useState(() => { const d=new Date(); d.setDate(d.getDate()-13); return d.toISOString().slice(0,10) })
+  const [from, setFrom] = useState(() => { const d=new Date(Date.now() - 13*86400000); const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d); return `${parts.find(p=>p.type==='year').value}-${parts.find(p=>p.type==='month').value}-${parts.find(p=>p.type==='day').value}` })
   const [to, setTo] = useState(todayStr())
   const load = useCallback(async () => {
     const r = await apiGet(`/master-register?centre_id=${centre?.id||'ALL'}&from=${from}&to=${to}`)
@@ -895,7 +895,7 @@ function RegisterView({ centre, onDrill, refreshTick }) {
                 {Cell('membership_sales', formatINR(r.membership_sales))}
                 {Cell('gift_card_sales', formatINR(r.gift_card_sales))}
                 {Cell('cash_sales', formatINR(r.cash_sales))}
-                {Cell('upi_sales', formatINR(r.upi_sales))}
+                {Cell('upi_1_sales', formatINR((r.upi_1_sales||0)+(r.upi_2_sales||0)))}
                 {Cell('card_sales', formatINR(r.card_sales))}
                 {Cell('total_expenses', formatINR(r.total_expenses), 'text-rose-500')}
                 {Cell('cash_deposited', formatINR(r.cash_deposited))}
@@ -1068,7 +1068,7 @@ function AuditView({ onDrill, refreshTick }) {
 // ============================================================================
 function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
   const [group, setGroup] = useState('month')
-  const [from, setFrom] = useState(() => { const d=new Date(); d.setMonth(d.getMonth()-2); d.setDate(1); return d.toISOString().slice(0,10) })
+  const [from, setFrom] = useState(() => { const d=new Date(); d.setMonth(d.getMonth()-2); d.setDate(1); const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(d); return `${parts.find(p=>p.type==='year').value}-${parts.find(p=>p.type==='month').value}-${parts.find(p=>p.type==='day').value}` })
   const [to, setTo] = useState(todayStr())
   const [centreFilter, setCentreFilter] = useState('CURRENT') // CURRENT|ALL
   const [data, setData] = useState(null)
