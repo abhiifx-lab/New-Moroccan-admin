@@ -484,7 +484,7 @@ function DashboardView({ centre, refreshTick, onDrill }) {
     setData(d); setLoading(false)
   }, [centre?.id, date])
   useEffect(() => { load() }, [load, refreshTick])
-  const a = data?.agg || {}
+  const a = data?.agg || data?.single_centre?.agg || data?.consolidated || {}
   const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
 
   return (
@@ -981,7 +981,7 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
     if (r.error) return toast.error(r.error)
     toast.success('Day reopened'); load(); bump()
   }
-  const agg = dash?.agg || {}
+  const agg = dash?.agg || dash?.single_centre?.agg || dash?.consolidated || {}
   const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date: todayStr() })
   return (
     <div className="space-y-4">
@@ -1420,6 +1420,7 @@ function UsersView({ centres, bump, refreshTick }) {
 
   const create = async () => {
     if (!f.email || !f.full_name) { toast.error('Email and Full Name required'); return }
+    if (!f.password || f.password.length < 8) { toast.error('Secure temporary password (min 8 chars) required'); return }
     if (f.role === 'CENTRE_USER' && !f.centre_id) { toast.error('Centre selection required for Centre Users'); return }
     const r = await apiPost('/users', f)
     if (r.error) { toast.error(r.error); return }
@@ -1445,7 +1446,7 @@ function UsersView({ centres, bump, refreshTick }) {
             <div className="space-y-4 py-2">
               <div><Label>Email</Label><Input type="email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} placeholder="user@aurea.spa"/></div>
               <div><Label>Full Name</Label><Input value={f.full_name} onChange={e=>setF({...f, full_name:e.target.value})} placeholder="Manager Name"/></div>
-              <div><Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} placeholder="Default: DefaultPass123!"/></div>
+              <div><Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} placeholder="Min 8 chars (temporary credential)"/></div>
               <div>
                 <Label>Role Assignment</Label>
                 <Select value={f.role} onValueChange={v => setF({...f, role:v, centre_id: v === 'SUPER_ADMIN' ? '' : f.centre_id})}>
