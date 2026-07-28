@@ -50,8 +50,13 @@ const NAV = [
   { id: 'register',    label: 'Master Register', icon: BookOpen },
   { id: 'cashbook',    label: 'Cash Book',       icon: Wallet },
   { id: 'close',       label: 'Business Day',    icon: Lock },
+  { id: 'reports',     label: 'Reports',         icon: FileText },
   { id: 'audit',       label: 'Audit Log',       icon: ShieldCheck },
 ]
+
+const BOOKING_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD','MIXED','MEMBERSHIP','GIFT_CARD']
+const SALE_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD']
+const EXPENSE_CATEGORIES = ['Utilities','Supplies','Salaries','Wages','Rent','Marketing','Maintenance','Consumables','Other']
 
 // ============================================================================
 // DRILL-DOWN CONTEXT
@@ -194,6 +199,7 @@ function DrillDownDialog({ ctx, role, bump }) {
 function MetricStage({ data, onEvent }) {
   const [q, setQ] = useState('')
   const events = data.events || []
+  const reversedIds = useMemo(() => new Set(events.map(x=>x.event).filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
   const filtered = q
     ? events.filter(x => JSON.stringify(x.event).toLowerCase().includes(q.toLowerCase()))
     : events
@@ -249,7 +255,7 @@ function MetricStage({ data, onEvent }) {
                   <TableCell>
                     <Badge variant={e.is_reversal ? 'destructive' : 'secondary'} className="mr-1">{e.type}</Badge>
                     {e.is_reversal && <Badge variant="outline" className="text-[10px]">REV</Badge>}
-                    {e.reversed_by_event_id && <Badge variant="outline" className="text-[10px] ml-1">REVERSED</Badge>}
+                    {reversedIds.has(e.id) && <Badge variant="outline" className="text-[10px] ml-1">REVERSED</Badge>}
                   </TableCell>
                   <TableCell className="text-sm">
                     {e.customer || e.category || e.movement_type?.replace(/_/g,' ') || '—'}
@@ -284,7 +290,7 @@ function MiniStat({ label, value, accent }) {
 
 function EventStage({ ev, onReverse, role, onOpenRelated }) {
   const li = ev.ledger_impact || {}
-  const canReverse = !ev.is_reversal && !ev.reversed_by_event_id
+  const canReverse = !ev.is_reversal && !ev.reversed
   return (
     <div className="space-y-4">
       {/* Header banner */}
@@ -293,7 +299,7 @@ function EventStage({ ev, onReverse, role, onOpenRelated }) {
           <div className="flex items-center gap-2 flex-wrap">
             <Badge variant={ev.is_reversal ? 'destructive' : 'default'} className="text-xs">{ev.type}</Badge>
             {ev.is_reversal && <Badge variant="outline">REVERSAL EVENT</Badge>}
-            {ev.reversed_by_event_id && <Badge variant="outline" className="text-rose-500">REVERSED</Badge>}
+            {ev.reversed && <Badge variant="outline" className="text-rose-500">REVERSED</Badge>}
             <Badge variant="outline">{ev.payment_method || ev.movement_type || '—'}</Badge>
           </div>
           <div className="mt-2 text-2xl font-semibold">{formatINR(ev.amount)}</div>
@@ -496,7 +502,8 @@ function DashboardView({ centre, refreshTick, onDrill }) {
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Payment Method</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
             <Row k="Cash Sales" v={formatINR(a.cash_sales)} onClick={()=>drill('cash_sales')}/>
-            <Row k="UPI Sales" v={formatINR(a.upi_sales)} onClick={()=>drill('upi_sales')}/>
+            <Row k="UPI 1 Sales" v={formatINR(a.upi_1_sales)} onClick={()=>drill('upi_1_sales')}/>
+            <Row k="UPI 2 Sales" v={formatINR(a.upi_2_sales)} onClick={()=>drill('upi_2_sales')}/>
             <Row k="Card Sales" v={formatINR(a.card_sales)} onClick={()=>drill('card_sales')}/>
           </CardContent>
         </Card>
@@ -531,12 +538,13 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
   const [services, setServices] = useState([])
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
-  const [f, setF] = useState({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi:'', mix_card:'', redemption_ref:'' })
+  const [f, setF] = useState({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi_1:'', mix_upi_2:'', mix_card:'', redemption_ref:'' })
   const load = async () => {
     const [s, e] = await Promise.all([apiGet('/services'), apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=BOOKING`)])
     setServices(s); setEvents(e)
   }
   useEffect(() => { if (centre?.id) load() }, [centre?.id, refreshTick])
+  const reversedIds = useMemo(() => new Set(events.filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
 
   const submit = async () => {
     const svc = services.find(x => x.id === f.service_id)
@@ -548,11 +556,11 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
       amount, payment_method: f.payment_method,
       redemption_ref: f.redemption_ref || null,
     }
-    if (f.payment_method === 'MIXED') body.payment_breakdown = { cash: toPaise(f.mix_cash), upi: toPaise(f.mix_upi), card: toPaise(f.mix_card) }
+    if (f.payment_method === 'MIXED') body.payment_breakdown = { cash: toPaise(f.mix_cash), upi_1: toPaise(f.mix_upi_1), upi_2: toPaise(f.mix_upi_2), card: toPaise(f.mix_card) }
     const r = await apiPost('/events/booking', body)
     if (r.error) { toast.error(r.error); return }
     toast.success('Booking recorded')
-    setOpen(false); setF({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi:'', mix_card:'', redemption_ref:'' })
+    setOpen(false); setF({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi_1:'', mix_upi_2:'', mix_card:'', redemption_ref:'' })
     bump(); load()
   }
 
@@ -577,7 +585,7 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
               <Field l="Payment">
                 <Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}>
                   <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>{['CASH','UPI','CARD','MIXED','MEMBERSHIP','GIFT_CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                  <SelectContent>{BOOKING_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
               {(f.payment_method==='MEMBERSHIP'||f.payment_method==='GIFT_CARD') && (
@@ -587,9 +595,10 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
               )}
             </div>
             {f.payment_method==='MIXED' && (
-              <div className="grid grid-cols-3 gap-3 mt-2">
+              <div className="grid grid-cols-4 gap-3 mt-2">
                 <Field l="Cash (₹)"><Input type="number" value={f.mix_cash} onChange={e=>setF({...f, mix_cash:e.target.value})}/></Field>
-                <Field l="UPI (₹)"><Input type="number" value={f.mix_upi} onChange={e=>setF({...f, mix_upi:e.target.value})}/></Field>
+                <Field l="UPI 1 (₹)"><Input type="number" value={f.mix_upi_1} onChange={e=>setF({...f, mix_upi_1:e.target.value})}/></Field>
+                <Field l="UPI 2 (₹)"><Input type="number" value={f.mix_upi_2} onChange={e=>setF({...f, mix_upi_2:e.target.value})}/></Field>
                 <Field l="Card (₹)"><Input type="number" value={f.mix_card} onChange={e=>setF({...f, mix_card:e.target.value})}/></Field>
               </div>
             )}
@@ -604,13 +613,13 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
           <TableBody>
             {events.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
             {events.map(e=>(
-              <TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({ type:'event', eventId:e.id })}>
+              <TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({ type:'event', eventId:e.id })}>
                 <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
                 <TableCell>{e.customer}</TableCell><TableCell>{e.service_name}</TableCell><TableCell>{e.therapist}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{e.payment_method}</Badge>
                   {e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}
-                  {e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}
+                  {reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}
                 </TableCell>
                 <TableCell className="text-right font-medium">{(e.payment_method==='MEMBERSHIP'||e.payment_method==='GIFT_CARD')?<span className="text-muted-foreground">redeemed</span>:formatINR(e.amount)}</TableCell>
                 <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
@@ -649,7 +658,7 @@ function MembershipView({ centre, role, bump, refreshTick }) {
               <Field l="Phone"><Input value={f.phone} onChange={e=>setF({...f, phone:e.target.value})}/></Field>
               <Field l="Amount (₹)"><Input type="number" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/></Field>
               <Field l="Payment"><Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{['CASH','UPI','CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></Field>
+                <SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field>
             </div>
             <DialogFooter><Button onClick={submit}>Sell</Button></DialogFooter>
           </DialogContent>
@@ -699,7 +708,7 @@ function GiftCardView({ centre, role, bump, refreshTick }) {
               <Field l="Recipient"><Input value={f.recipient} onChange={e=>setF({...f, recipient:e.target.value})}/></Field>
               <Field l="Amount (₹)"><Input type="number" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/></Field>
               <Field l="Payment"><Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{['CASH','UPI','CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></Field>
+                <SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field>
             </div>
             <DialogFooter><Button onClick={submit}>Sell</Button></DialogFooter>
           </DialogContent>
@@ -729,6 +738,7 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
   const [f, setF] = useState({ amount:'', payment_method:'CASH', category:'Utilities', vendor:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=EXPENSE`))
   useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
+  const reversedIds = useMemo(() => new Set(events.filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
   const submit = async () => {
     const r = await apiPost('/events/expense', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
@@ -744,9 +754,9 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
             <div className="grid grid-cols-2 gap-3">
               <Field l="Amount (₹)"><Input type="number" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/></Field>
               <Field l="Category"><Select value={f.category} onValueChange={v=>setF({...f, category:v})}><SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{['Utilities','Supplies','Salaries','Rent','Marketing','Maintenance','Consumables','Other'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></Field>
+                <SelectContent>{EXPENSE_CATEGORIES.map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></Field>
               <Field l="Payment"><Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger>
-                <SelectContent>{['CASH','UPI','CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent></Select></Field>
+                <SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field>
               <Field l="Vendor"><Input value={f.vendor} onChange={e=>setF({...f, vendor:e.target.value})}/></Field>
             </div>
             <Field l="Notes"><Textarea value={f.notes} onChange={e=>setF({...f, notes:e.target.value})}/></Field>
@@ -758,10 +768,10 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
         <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Category</TableHead><TableHead>Vendor</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
             {events.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No expenses today</TableCell></TableRow>}
-            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
+            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
               <TableCell>{e.category}</TableCell><TableCell>{e.vendor}</TableCell>
-              <TableCell><Badge variant="secondary">{e.payment_method}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
+              <TableCell><Badge variant="secondary">{e.payment_method}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-right font-medium text-rose-500">{formatINR(e.amount)}</TableCell>
               <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
             </TableRow>))}
@@ -777,6 +787,7 @@ function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick })
   const [f, setF] = useState({ amount:'', movement_type:'BANK_DEPOSIT', counterparty_centre_id:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=CASH_MOVEMENT`))
   useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
+  const reversedIds = useMemo(() => new Set(events.filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
   const submit = async () => {
     const r = await apiPost('/events/cash-movement', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
@@ -807,9 +818,9 @@ function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick })
         <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Type</TableHead><TableHead>Notes</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
             {events.length===0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">No cash movements today</TableCell></TableRow>}
-            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
+            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
-              <TableCell><Badge>{e.movement_type.replace(/_/g,' ')}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
+              <TableCell><Badge>{e.movement_type.replace(/_/g,' ')}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-xs">{e.notes}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(e.amount)}</TableCell>
               <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
@@ -1035,6 +1046,268 @@ function AuditView({ onDrill, refreshTick }) {
 }
 
 // ============================================================================
+// REPORTS (P&L + Cash Report + CSV export)
+// ============================================================================
+function ReportsView({ centre, centres, onDrill, refreshTick }) {
+  const [group, setGroup] = useState('month')
+  const [from, setFrom] = useState(() => { const d=new Date(); d.setMonth(d.getMonth()-2); d.setDate(1); return d.toISOString().slice(0,10) })
+  const [to, setTo] = useState(todayStr())
+  const [centreFilter, setCentreFilter] = useState('CURRENT') // CURRENT|ALL
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(false)
+
+  const centreId = centreFilter === 'ALL' ? 'ALL' : centre.id
+  const load = useCallback(async () => {
+    setLoading(true)
+    const r = await apiGet(`/reports/pl?centre_id=${centreId}&from=${from}&to=${to}&group=${group}`)
+    setData(r); setLoading(false)
+  }, [centreId, from, to, group])
+  useEffect(() => { load() }, [load, refreshTick])
+
+  const downloadCsv = () => {
+    const url = `/api/reports/csv?centre_id=${centreId}&from=${from}&to=${to}&group=${group}`
+    window.open(url, '_blank')
+  }
+  const drill = (metric, period) => {
+    // Compute date range from period label
+    let dFrom = from, dTo = to
+    if (group === 'day') { dFrom = period; dTo = period }
+    else if (group === 'month') { dFrom = period + '-01'; const [y,m] = period.split('-'); const last = new Date(Number(y), Number(m), 0); dTo = `${y}-${m}-${String(last.getDate()).padStart(2,'0')}` }
+    else if (group === 'year') { dFrom = `${period}-01-01`; dTo = `${period}-12-31` }
+    else if (group === 'week') { dFrom = from; dTo = to } // approximate
+    onDrill({ type:'metric', metric, centre_id: centreId, from: dFrom, to: dTo })
+  }
+
+  const totals = data?.totals?.consolidated || {}
+  const perCentre = data?.totals?.per_centre || []
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h2 className="text-2xl font-semibold">Reports</h2>
+          <p className="text-sm text-muted-foreground">P&amp;L and Cash Reports computed by the same event engine as Dashboard / Master Register / Cash Book. Every ₹ drills down to source events.</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select value={group} onValueChange={setGroup}>
+            <SelectTrigger className="w-[130px]"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="day">Daily</SelectItem>
+              <SelectItem value="week">Weekly</SelectItem>
+              <SelectItem value="month">Monthly</SelectItem>
+              <SelectItem value="year">Yearly</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={centreFilter} onValueChange={setCentreFilter}>
+            <SelectTrigger className="w-[180px]"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="CURRENT">{centre.name} only</SelectItem>
+              <SelectItem value="ALL">All Centres (consolidated)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
+          <span>—</span>
+          <Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
+          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+          <Button onClick={downloadCsv}><FileText className="h-4 w-4 mr-2"/>Export CSV</Button>
+        </div>
+      </div>
+
+      {/* Grand totals — P&L card */}
+      <Card>
+        <CardHeader><CardTitle className="text-sm text-muted-foreground">Profit &amp; Loss ({from} → {to})</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <MiniStat label="Gross Revenue" value={formatINR(totals.gross_revenue)} accent="text-emerald-500"/>
+            <MiniStat label="Revenue Reversals" value={formatINR(totals.revenue_reversals)} accent="text-rose-500"/>
+            <MiniStat label="Net Revenue" value={formatINR(totals.net_revenue)} accent="font-semibold"/>
+            <MiniStat label="Net Profit" value={formatINR(totals.net_profit)} accent={(totals.net_profit||0)>=0?'text-emerald-500 font-semibold':'text-rose-500 font-semibold'}/>
+            <MiniStat label="Gross Expenses" value={formatINR(totals.gross_expenses)} accent="text-rose-500"/>
+            <MiniStat label="Expense Reversals" value={formatINR(totals.expense_reversals)} accent="text-emerald-500"/>
+            <MiniStat label="Net Expenses" value={formatINR(totals.net_expenses)} accent="font-semibold"/>
+            <MiniStat label="Wages" value={formatINR(totals.wages_expenses)}/>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Payment breakdown */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Revenue by Payment Method</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-2">
+            <Row k="Cash Sales" v={formatINR(totals.cash_sales)} onClick={()=>drill('cash_sales', null)}/>
+            <Row k="UPI 1 Sales" v={formatINR(totals.upi_1_sales)} onClick={()=>drill('upi_1_sales', null)}/>
+            <Row k="UPI 2 Sales" v={formatINR(totals.upi_2_sales)} onClick={()=>drill('upi_2_sales', null)}/>
+            <Row k="Card Sales" v={formatINR(totals.card_sales)} onClick={()=>drill('card_sales', null)}/>
+            <div className="border-t border-border/50 my-1"/>
+            <Row k="Membership Redemption (op)" v={formatINR(totals.membership_redemption_value)} onClick={()=>drill('membership_redemption_value', null)}/>
+            <Row k="Gift Card Redemption (op)" v={formatINR(totals.gift_card_redemption_value)} onClick={()=>drill('gift_card_redemption_value', null)}/>
+          </CardContent>
+        </Card>
+        <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Expenses by Method + Category</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-2">
+            <Row k="Cash Expenses" v={formatINR(totals.cash_expenses)} onClick={()=>drill('cash_expenses', null)}/>
+            <Row k="UPI 1 Expenses" v={formatINR(totals.upi_1_expenses)} onClick={()=>drill('upi_1_expenses', null)}/>
+            <Row k="UPI 2 Expenses" v={formatINR(totals.upi_2_expenses)} onClick={()=>drill('upi_2_expenses', null)}/>
+            <Row k="Card Expenses" v={formatINR(totals.card_expenses)} onClick={()=>drill('card_expenses', null)}/>
+            <div className="border-t border-border/50 my-1"/>
+            <Row k="Wages" v={formatINR(totals.wages_expenses)} onClick={()=>drill('wages_expenses', null)}/>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Cash Report */}
+      <Card>
+        <CardHeader><CardTitle className="text-sm text-muted-foreground">Cash Report (period totals)</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <MiniStat label="Opening Cash" value={formatINR(totals.opening_cash)}/>
+            <MiniStat label="Cash Sales" value={formatINR(totals.cash_sales)} accent="text-emerald-500"/>
+            <MiniStat label="Float Added" value={formatINR(totals.float_added)}/>
+            <MiniStat label="Transfer In" value={formatINR(totals.cash_transfer_in)}/>
+            <MiniStat label="Cash Expenses" value={formatINR(totals.cash_expenses)} accent="text-rose-500"/>
+            <MiniStat label="Bank Deposits" value={formatINR(totals.cash_deposited)} accent="text-rose-500"/>
+            <MiniStat label="Owner Withdrawals" value={formatINR(totals.cash_withdrawn)} accent="text-rose-500"/>
+            <MiniStat label="Transfer Out" value={formatINR(totals.cash_transfer_out)} accent="text-rose-500"/>
+            <MiniStat label="Expected Closing Cash" value={formatINR(totals.closing_cash_expected)} accent="font-semibold col-span-2"/>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Per-centre breakdown (only when ALL selected) */}
+      {centreFilter === 'ALL' && perCentre.length > 0 && (
+        <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Per-Centre Totals</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader><TableRow>
+                <TableHead>Centre</TableHead>
+                <TableHead className="text-right">Gross Rev</TableHead>
+                <TableHead className="text-right">Net Rev</TableHead>
+                <TableHead className="text-right">Cash</TableHead>
+                <TableHead className="text-right">UPI 1</TableHead>
+                <TableHead className="text-right">UPI 2</TableHead>
+                <TableHead className="text-right">Card</TableHead>
+                <TableHead className="text-right">Expenses</TableHead>
+                <TableHead className="text-right">Net Profit</TableHead>
+              </TableRow></TableHeader>
+              <TableBody>
+                {perCentre.map(c => (
+                  <TableRow key={c.centre_id}>
+                    <TableCell className="font-medium">{c.centre_name}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.gross_revenue)}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.net_revenue)}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.cash_sales)}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.upi_1_sales)}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.upi_2_sales)}</TableCell>
+                    <TableCell className="text-right">{formatINR(c.card_sales)}</TableCell>
+                    <TableCell className="text-right text-rose-500">{formatINR(c.net_expenses)}</TableCell>
+                    <TableCell className={`text-right font-semibold ${(c.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}`}>{formatINR(c.net_profit)}</TableCell>
+                  </TableRow>
+                ))}
+                <TableRow className="bg-muted/40 font-semibold">
+                  <TableCell>Consolidated</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.gross_revenue)}</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.net_revenue)}</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.cash_sales)}</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.upi_1_sales)}</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.upi_2_sales)}</TableCell>
+                  <TableCell className="text-right">{formatINR(totals.card_sales)}</TableCell>
+                  <TableCell className="text-right text-rose-500">{formatINR(totals.net_expenses)}</TableCell>
+                  <TableCell className={`text-right ${(totals.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}`}>{formatINR(totals.net_profit)}</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Period rows */}
+      <Card>
+        <CardHeader><CardTitle className="text-sm text-muted-foreground">Period Breakdown ({group})</CardTitle></CardHeader>
+        <CardContent className="p-0 overflow-x-auto">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Period</TableHead>
+              {centreFilter === 'ALL' && <TableHead>Centre</TableHead>}
+              <TableHead className="text-right">Gross Rev</TableHead>
+              <TableHead className="text-right">Reversals</TableHead>
+              <TableHead className="text-right">Net Rev</TableHead>
+              <TableHead className="text-right">Cash</TableHead>
+              <TableHead className="text-right">UPI 1</TableHead>
+              <TableHead className="text-right">UPI 2</TableHead>
+              <TableHead className="text-right">Card</TableHead>
+              <TableHead className="text-right">Expenses</TableHead>
+              <TableHead className="text-right">Net Profit</TableHead>
+              <TableHead className="text-right">Guests</TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {(data?.rows || []).flatMap(row => {
+                if (centreFilter === 'ALL') {
+                  const lines = row.per_centre.map(c => (
+                    <TableRow key={row.period + '-' + c.centre_id}>
+                      <TableCell className="text-xs">{row.period}</TableCell>
+                      <TableCell className="text-sm">{c.centre_name}</TableCell>
+                      <TableCell className="text-right">{formatINR(c.gross_revenue)}</TableCell>
+                      <TableCell className="text-right text-rose-500">{formatINR(c.revenue_reversals)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('total_revenue', row.period)}>{formatINR(c.net_revenue)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('cash_sales', row.period)}>{formatINR(c.cash_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('upi_1_sales', row.period)}>{formatINR(c.upi_1_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('upi_2_sales', row.period)}>{formatINR(c.upi_2_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('card_sales', row.period)}>{formatINR(c.card_sales)}</TableCell>
+                      <TableCell className="text-right text-rose-500 cursor-pointer hover:bg-muted" onClick={()=>drill('total_expenses', row.period)}>{formatINR(c.net_expenses)}</TableCell>
+                      <TableCell className={`text-right ${(c.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}`}>{formatINR(c.net_profit)}</TableCell>
+                      <TableCell className="text-right">{c.guests}</TableCell>
+                    </TableRow>
+                  ))
+                  const cons = row.consolidated
+                  lines.push(
+                    <TableRow key={row.period + '-consolidated'} className="bg-muted/40 font-semibold">
+                      <TableCell className="text-xs">{row.period}</TableCell>
+                      <TableCell className="text-sm">Consolidated</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.gross_revenue)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.revenue_reversals)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.net_revenue)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.cash_sales)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.upi_1_sales)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.upi_2_sales)}</TableCell>
+                      <TableCell className="text-right">{formatINR(cons.card_sales)}</TableCell>
+                      <TableCell className="text-right text-rose-500">{formatINR(cons.net_expenses)}</TableCell>
+                      <TableCell className={`text-right ${(cons.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}`}>{formatINR(cons.net_profit)}</TableCell>
+                      <TableCell className="text-right">{cons.guests}</TableCell>
+                    </TableRow>
+                  )
+                  return lines
+                } else {
+                  const c = row.consolidated
+                  return [(
+                    <TableRow key={row.period}>
+                      <TableCell className="text-xs">{row.period}</TableCell>
+                      <TableCell className="text-right">{formatINR(c.gross_revenue)}</TableCell>
+                      <TableCell className="text-right text-rose-500">{formatINR(c.revenue_reversals)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('total_revenue', row.period)}>{formatINR(c.net_revenue)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('cash_sales', row.period)}>{formatINR(c.cash_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('upi_1_sales', row.period)}>{formatINR(c.upi_1_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('upi_2_sales', row.period)}>{formatINR(c.upi_2_sales)}</TableCell>
+                      <TableCell className="text-right cursor-pointer hover:bg-muted" onClick={()=>drill('card_sales', row.period)}>{formatINR(c.card_sales)}</TableCell>
+                      <TableCell className="text-right text-rose-500 cursor-pointer hover:bg-muted" onClick={()=>drill('total_expenses', row.period)}>{formatINR(c.net_expenses)}</TableCell>
+                      <TableCell className={`text-right ${(c.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}`}>{formatINR(c.net_profit)}</TableCell>
+                      <TableCell className="text-right">{c.guests}</TableCell>
+                    </TableRow>
+                  )]
+                }
+              })}
+              {(!data?.rows || data.rows.length === 0) && (
+                <TableRow><TableCell colSpan={centreFilter==='ALL'?12:11} className="text-center text-muted-foreground py-6">No data in range</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+      {loading && <div className="text-xs text-muted-foreground">Loading...</div>}
+    </div>
+  )
+}
+
+// ============================================================================
 // SHELL
 // ============================================================================
 function App() {
@@ -1115,6 +1388,7 @@ function App() {
           {view==='register'   && <RegisterView {...props} />}
           {view==='cashbook'   && <CashBookView {...props} />}
           {view==='close'      && <CloseView {...props} />}
+          {view==='reports'    && <ReportsView {...props} />}
           {view==='audit'      && <AuditView {...props} />}
         </main>
       </div>

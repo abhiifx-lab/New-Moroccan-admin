@@ -1,7 +1,11 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
-import { aggregate, drillDown, businessDate, EVENT_TYPES, CASH_MOVEMENT_TYPES, METRICS, cashImpact, paymentSplit } from '@/lib/financial-engine'
+import {
+  aggregate, drillDown, businessDate, periodLabel,
+  EVENT_TYPES, CASH_MOVEMENT_TYPES, METRICS, APPROVED_CENTRES,
+  cashImpact, paymentSplit,
+} from '@/lib/financial-engine'
 
 let client, db
 async function getDb() {
@@ -9,6 +13,7 @@ async function getDb() {
     client = new MongoClient(process.env.MONGO_URL)
     await client.connect()
     db = client.db(process.env.DB_NAME)
+    await cleanupInvalidCentres(db)
     await ensureSeed(db)
     await ensureIndexes(db)
   }
@@ -27,16 +32,53 @@ async function ensureIndexes(db) {
   await db.collection('audit_log').createIndex({ target_event_id: 1 })
 }
 
+// Purge any centre that is not in the approved list, and CASCADE-delete
+// every operational record referencing it. Also delete any events with
+// legacy UPI payment_method (before the UPI_1/UPI_2 split) since they can't
+// be attributed and would poison reports.
+async function cleanupInvalidCentres(db) {
+  const all = await db.collection('centres').find({}).toArray()
+  const invalid = all.filter(c => !APPROVED_CENTRES.includes(c.name))
+  const invalidIds = invalid.map(c => c.id)
+
+  // Rename legacy "Phoenix" to "Phoenix Pallassio" (preserving centre id + history)
+  const legacyPhoenix = all.find(c => c.name === 'Phoenix')
+  if (legacyPhoenix) {
+    await db.collection('centres').updateOne({ id: legacyPhoenix.id }, { $set: { name: 'Phoenix Pallassio' } })
+    // Not invalid anymore — remove from invalidIds
+    const i = invalidIds.indexOf(legacyPhoenix.id)
+    if (i >= 0) invalidIds.splice(i, 1)
+  }
+
+  if (invalidIds.length > 0) {
+    await db.collection('events').deleteMany({ centre_id: { $in: invalidIds } })
+    await db.collection('business_days').deleteMany({ centre_id: { $in: invalidIds } })
+    await db.collection('memberships').deleteMany({ sold_at_centre_id: { $in: invalidIds } })
+    await db.collection('gift_cards').deleteMany({ sold_at_centre_id: { $in: invalidIds } })
+    await db.collection('audit_log').deleteMany({ centre_id: { $in: invalidIds } })
+    await db.collection('centres').deleteMany({ id: { $in: invalidIds } })
+  }
+
+  // Legacy UPI events → wipe (payment method split changed). This is a one-time cleanup.
+  const legacyUpiEvents = await db.collection('events').find({ payment_method: 'UPI' }).toArray()
+  if (legacyUpiEvents.length > 0) {
+    const ids = legacyUpiEvents.map(e => e.id)
+    await db.collection('events').deleteMany({ id: { $in: ids } })
+    // Also remove reversals that reversed a deleted event
+    await db.collection('events').deleteMany({ reverses: { $in: ids } })
+  }
+}
+
 async function ensureSeed(db) {
-  const c = await db.collection('centres').countDocuments()
-  if (c === 0) {
-    const centres = [
-      { name: 'Lulu Mall', code: 'LULU', city: 'Kochi' },
-      { name: 'Holiday Inn', code: 'HINN', city: 'Mumbai' },
-      { name: 'Phoenix', code: 'PHNX', city: 'Bangalore' },
-      { name: 'Gomti Nagar', code: 'GMTI', city: 'Lucknow' },
-    ].map(x => ({ id: uuidv4(), ...x, active: true, created_at: new Date() }))
-    await db.collection('centres').insertMany(centres)
+  for (const name of APPROVED_CENTRES) {
+    const exists = await db.collection('centres').findOne({ name })
+    if (!exists) {
+      const code = name === 'Phoenix Pallassio' ? 'PHNX' : name === 'Holiday Inn' ? 'HINN' : 'LULU'
+      const city = name === 'Phoenix Pallassio' ? 'Lucknow' : name === 'Holiday Inn' ? 'Lucknow' : 'Lucknow'
+      await db.collection('centres').insertOne({
+        id: uuidv4(), name, code, city, active: true, created_at: new Date(),
+      })
+    }
   }
   const s = await db.collection('services').countDocuments()
   if (s === 0) {
@@ -79,15 +121,34 @@ async function ensureBusinessDay(db, centre_id, date) {
   return bd
 }
 
+async function validateCentre(db, centre_id) {
+  const c = await db.collection('centres').findOne({ id: centre_id, active: true })
+  if (!c) throw new Error(`Invalid or unknown centre_id: ${centre_id}`)
+  if (!APPROVED_CENTRES.includes(c.name)) throw new Error(`Centre "${c.name}" is not approved`)
+  return c
+}
+
 async function writeAudit(db, entry) {
   await db.collection('audit_log').insertOne({ id: uuidv4(), created_at: new Date(), ...entry })
 }
 
-// Enrich event with related entities for detail views.
+// Enrich event with derived state. Original event is NEVER mutated.
+// "reversed" state is derived by looking for a reversal event with reverses=<id>.
 async function enrichEvent(db, ev) {
   if (!ev) return null
   const centre = await db.collection('centres').findOne({ id: ev.centre_id })
   const enriched = { ...ev, centre: centre ? clean(centre) : null }
+
+  // Derived: is this event reversed by another?
+  const reversal = await db.collection('events').findOne({ reverses: ev.id, is_reversal: true })
+  enriched.reversed = !!reversal
+  enriched.reversal_event = reversal ? clean(reversal) : null
+
+  // Derived: is this itself a reversal?
+  if (ev.reverses) {
+    enriched.original_event = clean(await db.collection('events').findOne({ id: ev.reverses }))
+  }
+
   if (ev.type === 'MEMBERSHIP_SALE') {
     const m = await db.collection('memberships').findOne({ code: ev.membership_code })
     enriched.membership = m ? clean(m) : null
@@ -105,7 +166,6 @@ async function enrichEvent(db, ev) {
       enriched.gift_card = g ? clean(g) : null
     }
   }
-  // Ledger impact (signed)
   const sign = ev.is_reversal ? -1 : 1
   const split = paymentSplit(ev)
   enriched.ledger_impact = {
@@ -114,23 +174,28 @@ async function enrichEvent(db, ev) {
       : (['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * (ev.amount || 0) : 0),
     expense: ev.type === 'EXPENSE' ? sign * (ev.amount || 0) : 0,
     cash: sign * cashImpact(ev),
-    upi: ['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * split.upi : (ev.type==='EXPENSE' && ev.payment_method==='UPI' ? -sign * (ev.amount||0) : 0),
-    card: ['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * split.card : (ev.type==='EXPENSE' && ev.payment_method==='CARD' ? -sign * (ev.amount||0) : 0),
+    upi_1: ['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * split.upi_1 : (ev.type==='EXPENSE' && ev.payment_method==='UPI_1' ? -sign * (ev.amount||0) : 0),
+    upi_2: ['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * split.upi_2 : (ev.type==='EXPENSE' && ev.payment_method==='UPI_2' ? -sign * (ev.amount||0) : 0),
+    card:  ['BOOKING','MEMBERSHIP_SALE','GIFT_CARD_SALE'].includes(ev.type) ? sign * split.card  : (ev.type==='EXPENSE' && ev.payment_method==='CARD'  ? -sign * (ev.amount||0) : 0),
     liability_delta: ev.type === 'MEMBERSHIP_SALE' || ev.type === 'GIFT_CARD_SALE' ? sign * (ev.amount || 0)
       : (ev.type === 'BOOKING' && (ev.payment_method === 'MEMBERSHIP' || ev.payment_method === 'GIFT_CARD') ? -sign * (ev.amount || 0) : 0),
   }
-  // Audit history
   enriched.audit_history = cleanArr(
     await db.collection('audit_log').find({ target_event_id: ev.id }).sort({ created_at: 1 }).toArray()
   )
-  // Related reversal (if any)
-  if (ev.reversed_by_event_id) {
-    enriched.reversal_event = clean(await db.collection('events').findOne({ id: ev.reversed_by_event_id }))
-  }
-  if (ev.reverses) {
-    enriched.original_event = clean(await db.collection('events').findOne({ id: ev.reverses }))
-  }
   return enriched
+}
+
+function toCsv(rows, columns) {
+  const escape = v => {
+    if (v == null) return ''
+    const s = String(v)
+    if (s.includes('"') || s.includes(',') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"'
+    return s
+  }
+  const header = columns.map(c => escape(c.label)).join(',')
+  const body = rows.map(r => columns.map(c => escape(c.get(r))).join(',')).join('\n')
+  return header + '\n' + body
 }
 
 async function handle(request, { params }) {
@@ -150,12 +215,6 @@ async function handle(request, { params }) {
       const centres = await db.collection('centres').find({ active: true }).sort({ name: 1 }).toArray()
       return cors(NextResponse.json(cleanArr(centres)))
     }
-    if (route === '/centres' && method === 'POST') {
-      const b = await request.json()
-      const doc = { id: uuidv4(), name: b.name, code: b.code, city: b.city || '', active: true, created_at: new Date() }
-      await db.collection('centres').insertOne(doc)
-      return cors(NextResponse.json(clean(doc)))
-    }
 
     // ---------------- SERVICES ----------------
     if (route === '/services' && method === 'GET') {
@@ -163,7 +222,7 @@ async function handle(request, { params }) {
       return cors(NextResponse.json(cleanArr(s)))
     }
 
-    // ---------------- METRICS (list) ----------------
+    // ---------------- METRICS ----------------
     if (route === '/metrics' && method === 'GET') {
       const out = {}
       for (const [k, v] of Object.entries(METRICS)) out[k] = { label: v.label, isCount: !!v.isCount, unique: v.unique || null }
@@ -177,12 +236,9 @@ async function handle(request, { params }) {
       if (q.date) filter.business_date = q.date
       if (q.from && q.to) filter.business_date = { $gte: q.from, $lte: q.to }
       if (q.type) filter.type = q.type
-      if (q.include_reversals !== '1') { /* still include reversals; they have their own type */ }
-      const events = await db.collection('events').find(filter).sort({ created_at: -1 }).limit(2000).toArray()
+      const events = await db.collection('events').find(filter).sort({ created_at: -1 }).limit(5000).toArray()
       return cors(NextResponse.json(cleanArr(events)))
     }
-
-    // Single event with full detail
     if (route.startsWith('/events/') && !route.includes('/reverse') && method === 'GET') {
       const id = route.split('/')[2]
       const ev = await db.collection('events').findOne({ id })
@@ -194,6 +250,7 @@ async function handle(request, { params }) {
     // ---------------- EVENTS CREATE ----------------
     if (route === '/events/booking' && method === 'POST') {
       const b = await request.json()
+      await validateCentre(db, b.centre_id)
       const date = b.business_date || businessDate()
       const bd = await ensureBusinessDay(db, b.centre_id, date)
       if (bd.status === 'CLOSED') return cors(NextResponse.json({ error: 'Business day is closed. Reopen required.' }, { status: 400 }))
@@ -209,7 +266,7 @@ async function handle(request, { params }) {
         booking_time: b.booking_time || new Date().toISOString(),
         status: b.status || 'COMPLETED',
         redemption_ref: b.redemption_ref || null, notes: b.notes || '',
-        is_reversal: false, reverses: null, reversed_by_event_id: null,
+        is_reversal: false, reverses: null,
       }
 
       if (event.payment_method === 'MEMBERSHIP') {
@@ -244,10 +301,10 @@ async function handle(request, { params }) {
 
     if (route === '/events/membership' && method === 'POST') {
       const b = await request.json()
+      await validateCentre(db, b.centre_id)
       const date = b.business_date || businessDate()
       const bd = await ensureBusinessDay(db, b.centre_id, date)
       if (bd.status === 'CLOSED') return cors(NextResponse.json({ error: 'Business day is closed' }, { status: 400 }))
-
       const code = b.code || ('M-' + Date.now().toString(36).toUpperCase())
       const membership = {
         id: uuidv4(), code, customer: b.customer, phone: b.phone || '',
@@ -257,7 +314,6 @@ async function handle(request, { params }) {
         created_at: new Date(),
       }
       await db.collection('memberships').insertOne(membership)
-
       const event = {
         id: uuidv4(), type: EVENT_TYPES.MEMBERSHIP_SALE,
         centre_id: b.centre_id, business_date: date,
@@ -265,7 +321,7 @@ async function handle(request, { params }) {
         customer: b.customer, amount: Number(b.amount) || 0,
         payment_method: b.payment_method, payment_breakdown: b.payment_breakdown || null,
         membership_code: code, notes: b.notes || '',
-        is_reversal: false, reverses: null, reversed_by_event_id: null,
+        is_reversal: false, reverses: null,
       }
       await db.collection('events').insertOne(event)
       await db.collection('memberships').updateOne({ code }, { $set: { source_event_id: event.id } })
@@ -279,10 +335,10 @@ async function handle(request, { params }) {
 
     if (route === '/events/gift-card' && method === 'POST') {
       const b = await request.json()
+      await validateCentre(db, b.centre_id)
       const date = b.business_date || businessDate()
       const bd = await ensureBusinessDay(db, b.centre_id, date)
       if (bd.status === 'CLOSED') return cors(NextResponse.json({ error: 'Business day is closed' }, { status: 400 }))
-
       const code = b.code || ('GC-' + Date.now().toString(36).toUpperCase())
       const gc = {
         id: uuidv4(), code, buyer: b.customer, recipient: b.recipient || b.customer,
@@ -292,7 +348,6 @@ async function handle(request, { params }) {
         created_at: new Date(),
       }
       await db.collection('gift_cards').insertOne(gc)
-
       const event = {
         id: uuidv4(), type: EVENT_TYPES.GIFT_CARD_SALE,
         centre_id: b.centre_id, business_date: date,
@@ -300,7 +355,7 @@ async function handle(request, { params }) {
         customer: b.customer, amount: Number(b.amount) || 0,
         payment_method: b.payment_method, payment_breakdown: b.payment_breakdown || null,
         gift_card_code: code, notes: b.notes || '',
-        is_reversal: false, reverses: null, reversed_by_event_id: null,
+        is_reversal: false, reverses: null,
       }
       await db.collection('events').insertOne(event)
       await db.collection('gift_cards').updateOne({ code }, { $set: { source_event_id: event.id } })
@@ -314,6 +369,7 @@ async function handle(request, { params }) {
 
     if (route === '/events/expense' && method === 'POST') {
       const b = await request.json()
+      await validateCentre(db, b.centre_id)
       const date = b.business_date || businessDate()
       const bd = await ensureBusinessDay(db, b.centre_id, date)
       if (bd.status === 'CLOSED') return cors(NextResponse.json({ error: 'Business day is closed' }, { status: 400 }))
@@ -324,7 +380,7 @@ async function handle(request, { params }) {
         amount: Number(b.amount) || 0, payment_method: b.payment_method,
         category: b.category, vendor: b.vendor || '', receipt_url: b.receipt_url || '',
         notes: b.notes || '',
-        is_reversal: false, reverses: null, reversed_by_event_id: null,
+        is_reversal: false, reverses: null,
       }
       await db.collection('events').insertOne(event)
       await writeAudit(db, {
@@ -337,6 +393,7 @@ async function handle(request, { params }) {
 
     if (route === '/events/cash-movement' && method === 'POST') {
       const b = await request.json()
+      await validateCentre(db, b.centre_id)
       const date = b.business_date || businessDate()
       const bd = await ensureBusinessDay(db, b.centre_id, date)
       if (bd.status === 'CLOSED') return cors(NextResponse.json({ error: 'Business day is closed' }, { status: 400 }))
@@ -347,7 +404,7 @@ async function handle(request, { params }) {
         created_at: new Date(), created_by: b.created_by || 'reception',
         amount: Number(b.amount) || 0, movement_type: b.movement_type,
         counterparty_centre_id: b.counterparty_centre_id || null, notes: b.notes || '',
-        is_reversal: false, reverses: null, reversed_by_event_id: null,
+        is_reversal: false, reverses: null,
       }
       await db.collection('events').insertOne(event)
       await writeAudit(db, {
@@ -358,8 +415,7 @@ async function handle(request, { params }) {
       return cors(NextResponse.json(clean(event)))
     }
 
-    // ---------------- IMMUTABLE REVERSAL ----------------
-    // Creates a new opposite event; never edits the original.
+    // ---------------- IMMUTABLE REVERSAL (never mutates original event) ----------------
     if (route.startsWith('/events/') && route.endsWith('/reverse') && method === 'POST') {
       const id = route.split('/')[2]
       const b = await request.json()
@@ -371,34 +427,54 @@ async function handle(request, { params }) {
       const original = await db.collection('events').findOne({ id })
       if (!original) return cors(NextResponse.json({ error: 'Event not found' }, { status: 404 }))
       if (original.is_reversal) return cors(NextResponse.json({ error: 'Cannot reverse a reversal event' }, { status: 400 }))
-      if (original.reversed_by_event_id) return cors(NextResponse.json({ error: 'Event is already reversed' }, { status: 400 }))
+
+      // Derive "already reversed" state without touching original
+      const existingReversal = await db.collection('events').findOne({ reverses: id, is_reversal: true })
+      if (existingReversal) return cors(NextResponse.json({ error: 'Event is already reversed' }, { status: 400 }))
 
       const bd = await db.collection('business_days').findOne({ centre_id: original.centre_id, business_date: original.business_date })
       if (bd?.status === 'CLOSED' && !['MANAGER', 'OPS', 'SUPER'].includes(role)) {
         return cors(NextResponse.json({ error: 'Business day is closed. Manager approval required to reverse.' }, { status: 403 }))
       }
 
-      // Build the reversal event: a clone with is_reversal=true, same amount and metadata.
-      // aggregate() negates its contribution via sign=-1.
+      // Build reversal event: NEW UUID, NEW timestamp, is_reversal=true, reverses=originalId.
+      // All financial fields copied so aggregate() can negate them via sign=-1.
       const reversal = {
-        ...original,
-        _id: undefined,
         id: uuidv4(),
-        created_at: new Date(),
+        type: original.type,
+        centre_id: original.centre_id,                 // SAME CENTRE
+        business_date: original.business_date,         // same date — reversal on same day for simplicity
+        created_at: new Date(),                        // NEW timestamp
         created_by: actor,
+        customer: original.customer,
+        therapist: original.therapist,
+        service_id: original.service_id,
+        service_name: original.service_name,
+        amount: original.amount,
+        payment_method: original.payment_method,
+        payment_breakdown: original.payment_breakdown,
+        booking_time: original.booking_time,
+        status: original.status,
+        redemption_ref: original.redemption_ref,
+        movement_type: original.movement_type,
+        counterparty_centre_id: original.counterparty_centre_id,
+        category: original.category,
+        vendor: original.vendor,
+        membership_code: original.membership_code,
+        gift_card_code: original.gift_card_code,
+        notes: `Reversal of ${original.id}`,
         is_reversal: true,
         reverses: original.id,
         reversal_reason: reason,
         reversal_role: role,
-        reversed_by_event_id: null,
       }
-      delete reversal._id
+      Object.keys(reversal).forEach(k => reversal[k] === undefined && delete reversal[k])
       await db.collection('events').insertOne(reversal)
 
-      // Point original at its reversal (metadata field only — original amounts untouched).
-      await db.collection('events').updateOne({ id: original.id }, { $set: { reversed_by_event_id: reversal.id, reversed_at: new Date(), reversed_by: actor, reversal_reason: reason } })
+      // IMPORTANT: The original event is NOT modified in any way. No updateOne on it.
+      // "Reversed" state is derived by querying for a reversal event where reverses=<id>.
 
-      // Restore liability balances.
+      // Update liability aggregate state (memberships/gift_cards are state — not events).
       if (original.type === 'MEMBERSHIP_SALE' && original.membership_code) {
         await db.collection('memberships').updateOne(
           { code: original.membership_code },
@@ -441,9 +517,7 @@ async function handle(request, { params }) {
 
     // ---------------- BUSINESS DAY ----------------
     if (route === '/business-day' && method === 'GET') {
-      const centre_id = q.centre_id
-      const date = q.date || businessDate()
-      const bd = await ensureBusinessDay(db, centre_id, date)
+      const bd = await ensureBusinessDay(db, q.centre_id, q.date || businessDate())
       return cors(NextResponse.json(clean(bd)))
     }
     if (route === '/business-day/close' && method === 'POST') {
@@ -506,7 +580,6 @@ async function handle(request, { params }) {
     }
 
     // ---------------- DRILL-DOWN ----------------
-    // ?metric=<key>&centre_id=&date= OR &from=&to=
     if (route === '/drill-down' && method === 'GET') {
       const metric = q.metric
       if (!metric || !METRICS[metric]) return cors(NextResponse.json({ error: `Unknown metric: ${metric}` }, { status: 400 }))
@@ -515,9 +588,8 @@ async function handle(request, { params }) {
       if (q.date) filter.business_date = q.date
       if (q.from && q.to) filter.business_date = { $gte: q.from, $lte: q.to }
       if (q.type) filter.type = q.type
-      const events = await db.collection('events').find(filter).sort({ created_at: -1 }).limit(5000).toArray()
+      const events = await db.collection('events').find(filter).sort({ created_at: -1 }).limit(10000).toArray()
       const result = drillDown(cleanArr(events), metric)
-      // Group breakdown by event type for the top-level view.
       const breakdown = {}
       for (const item of result.events) {
         const t = item.event.type
@@ -541,7 +613,6 @@ async function handle(request, { params }) {
       if (centre_id !== 'ALL') bdFilter.centre_id = centre_id
       const events = await db.collection('events').find(evFilter).toArray()
       const bds = await db.collection('business_days').find(bdFilter).toArray()
-
       const rows = []
       const dates = new Set(events.map(e => e.business_date).concat(bds.map(b => b.business_date)))
       const sorted = Array.from(dates).sort()
@@ -565,13 +636,10 @@ async function handle(request, { params }) {
       const date = q.date || businessDate()
       if (!centre_id) return cors(NextResponse.json({ error: 'centre_id required' }, { status: 400 }))
       const bd = await ensureBusinessDay(db, centre_id, date)
-      const events = await db.collection('events')
-        .find({ centre_id, business_date: date }).sort({ created_at: 1 }).toArray()
-
+      const events = await db.collection('events').find({ centre_id, business_date: date }).sort({ created_at: 1 }).toArray()
       const lines = []
       let running = bd.opening_cash || 0
       lines.push({ time: null, ref: 'OPENING', desc: 'Opening Cash', in: bd.opening_cash || 0, out: 0, running })
-
       for (const ev of events) {
         const sign = ev.is_reversal ? -1 : 1
         let inAmt = 0, outAmt = 0, desc = '', ref = ev.type
@@ -579,7 +647,7 @@ async function handle(request, { params }) {
           const cash = paymentSplit(ev).cash
           if (cash > 0) {
             const signed = sign * cash
-            if (signed >= 0) { inAmt = signed } else { outAmt = -signed }
+            if (signed >= 0) inAmt = signed; else outAmt = -signed
             desc = `${ev.is_reversal ? 'REVERSAL: ' : ''}${ev.type} – ${ev.customer || ''}`
           } else continue
         } else if (ev.type === 'EXPENSE' && ev.payment_method === 'CASH') {
@@ -600,6 +668,165 @@ async function handle(request, { params }) {
       }
       const agg = aggregate(events, bd.opening_cash || 0)
       return cors(NextResponse.json({ business_day: clean(bd), lines, agg }))
+    }
+
+    // ---------------- REPORTS ----------------
+    // /reports/pl?centre_id=&from=&to=&group=day|week|month|year
+    if (route === '/reports/pl' && method === 'GET') {
+      const centre_id = q.centre_id || 'ALL'
+      const from = q.from, to = q.to
+      const group = q.group || 'month'
+      if (!from || !to) return cors(NextResponse.json({ error: 'from, to required (YYYY-MM-DD)' }, { status: 400 }))
+
+      const centres = await db.collection('centres').find({ active: true }).sort({ name: 1 }).toArray()
+      const centreIds = centres.map(c => c.id)
+      const centreById = Object.fromEntries(centres.map(c => [c.id, c]))
+
+      const evFilter = { business_date: { $gte: from, $lte: to }, centre_id: { $in: centre_id === 'ALL' ? centreIds : [centre_id] } }
+      const bdFilter = { business_date: { $gte: from, $lte: to }, centre_id: { $in: centre_id === 'ALL' ? centreIds : [centre_id] } }
+      const events = await db.collection('events').find(evFilter).toArray()
+      const bds = await db.collection('business_days').find(bdFilter).toArray()
+
+      // Bucket by (period, centre_id)
+      const bucket = new Map()      // key = period|centreId → events[]
+      const openings = new Map()    // key = period|centreId → paise
+      const periods = new Set()
+      for (const ev of events) {
+        const p = periodLabel(ev.business_date, group)
+        periods.add(p)
+        const key = p + '|' + ev.centre_id
+        if (!bucket.has(key)) bucket.set(key, [])
+        bucket.get(key).push(ev)
+      }
+      for (const bd of bds) {
+        const p = periodLabel(bd.business_date, group)
+        periods.add(p)
+        const key = p + '|' + bd.centre_id
+        openings.set(key, (openings.get(key) || 0) + (bd.opening_cash || 0))
+      }
+      const includedCentres = centre_id === 'ALL' ? centres : [centreById[centre_id]].filter(Boolean)
+
+      const rows = []
+      for (const p of Array.from(periods).sort()) {
+        const perCentre = []
+        let consolidatedEvents = []
+        let consolidatedOpening = 0
+        for (const c of includedCentres) {
+          const key = p + '|' + c.id
+          const evs = bucket.get(key) || []
+          const opening = openings.get(key) || 0
+          if (evs.length === 0 && opening === 0) continue
+          const agg = aggregate(evs, opening)
+          perCentre.push({ centre_id: c.id, centre_name: c.name, opening_cash: opening, ...agg })
+          consolidatedEvents = consolidatedEvents.concat(evs)
+          consolidatedOpening += opening
+        }
+        rows.push({
+          period: p,
+          per_centre: perCentre,
+          consolidated: { opening_cash: consolidatedOpening, ...aggregate(consolidatedEvents, consolidatedOpening) },
+        })
+      }
+
+      // Grand totals
+      const grandPerCentre = []
+      for (const c of includedCentres) {
+        const evs = events.filter(e => e.centre_id === c.id)
+        const opening = bds.filter(b => b.centre_id === c.id).reduce((s, b) => s + (b.opening_cash || 0), 0)
+        if (evs.length === 0 && opening === 0) continue
+        grandPerCentre.push({ centre_id: c.id, centre_name: c.name, opening_cash: opening, ...aggregate(evs, opening) })
+      }
+      const totalOpening = bds.reduce((s, b) => s + (b.opening_cash || 0), 0)
+      const grandConsolidated = { opening_cash: totalOpening, ...aggregate(events, totalOpening) }
+
+      return cors(NextResponse.json({
+        group, from, to, centre_id,
+        rows, totals: { per_centre: grandPerCentre, consolidated: grandConsolidated },
+      }))
+    }
+
+    // /reports/csv — same shape as /reports/pl but returns CSV.
+    if (route === '/reports/csv' && method === 'GET') {
+      const centre_id = q.centre_id || 'ALL'
+      const from = q.from, to = q.to
+      const group = q.group || 'month'
+      if (!from || !to) return cors(NextResponse.json({ error: 'from, to required' }, { status: 400 }))
+      const params = new URLSearchParams({ centre_id, from, to, group })
+      const plUrl = new URL(url.href.replace('/reports/csv', '/reports/pl'))
+      plUrl.search = params.toString()
+      // Recompute inline to avoid HTTP self-call
+      const centres = await db.collection('centres').find({ active: true }).sort({ name: 1 }).toArray()
+      const centreIds = centres.map(c => c.id)
+      const evFilter = { business_date: { $gte: from, $lte: to }, centre_id: { $in: centre_id === 'ALL' ? centreIds : [centre_id] } }
+      const bdFilter = evFilter
+      const events = await db.collection('events').find(evFilter).toArray()
+      const bds = await db.collection('business_days').find(bdFilter).toArray()
+
+      const bucket = new Map(), openings = new Map(), periods = new Set()
+      for (const ev of events) { const p = periodLabel(ev.business_date, group); periods.add(p); const k = p+'|'+ev.centre_id; if(!bucket.has(k)) bucket.set(k,[]); bucket.get(k).push(ev) }
+      for (const bd of bds) { const p = periodLabel(bd.business_date, group); periods.add(p); const k = p+'|'+bd.centre_id; openings.set(k, (openings.get(k)||0)+(bd.opening_cash||0)) }
+      const includedCentres = centre_id === 'ALL' ? centres : centres.filter(c => c.id === centre_id)
+
+      const flat = []
+      for (const p of Array.from(periods).sort()) {
+        for (const c of includedCentres) {
+          const evs = bucket.get(p+'|'+c.id) || []
+          const opening = openings.get(p+'|'+c.id) || 0
+          if (evs.length === 0 && opening === 0) continue
+          flat.push({ period: p, centre: c.name, opening, agg: aggregate(evs, opening) })
+        }
+        if (includedCentres.length > 1) {
+          const evs = includedCentres.flatMap(c => bucket.get(p+'|'+c.id) || [])
+          const opening = includedCentres.reduce((s,c) => s + (openings.get(p+'|'+c.id) || 0), 0)
+          if (evs.length > 0 || opening > 0) flat.push({ period: p, centre: 'ALL CENTRES', opening, agg: aggregate(evs, opening) })
+        }
+      }
+
+      const toR = paise => (Number(paise||0)/100).toFixed(2)
+      const cols = [
+        { label: 'Period', get: r => r.period },
+        { label: 'Centre', get: r => r.centre },
+        { label: 'Opening Cash', get: r => toR(r.opening) },
+        { label: 'Booking Sales', get: r => toR(r.agg.booking_sales) },
+        { label: 'Membership Sales', get: r => toR(r.agg.membership_sales) },
+        { label: 'Gift Card Sales', get: r => toR(r.agg.gift_card_sales) },
+        { label: 'Gross Revenue', get: r => toR(r.agg.gross_revenue) },
+        { label: 'Revenue Reversals', get: r => toR(r.agg.revenue_reversals) },
+        { label: 'Net Revenue', get: r => toR(r.agg.net_revenue) },
+        { label: 'Cash Sales', get: r => toR(r.agg.cash_sales) },
+        { label: 'UPI 1 Sales', get: r => toR(r.agg.upi_1_sales) },
+        { label: 'UPI 2 Sales', get: r => toR(r.agg.upi_2_sales) },
+        { label: 'Card Sales', get: r => toR(r.agg.card_sales) },
+        { label: 'Membership Redemption', get: r => toR(r.agg.membership_redemption_value) },
+        { label: 'Gift Card Redemption', get: r => toR(r.agg.gift_card_redemption_value) },
+        { label: 'Cash Expenses', get: r => toR(r.agg.cash_expenses) },
+        { label: 'UPI 1 Expenses', get: r => toR(r.agg.upi_1_expenses) },
+        { label: 'UPI 2 Expenses', get: r => toR(r.agg.upi_2_expenses) },
+        { label: 'Card Expenses', get: r => toR(r.agg.card_expenses) },
+        { label: 'Wages', get: r => toR(r.agg.wages_expenses) },
+        { label: 'Gross Expenses', get: r => toR(r.agg.gross_expenses) },
+        { label: 'Expense Reversals', get: r => toR(r.agg.expense_reversals) },
+        { label: 'Net Expenses', get: r => toR(r.agg.net_expenses) },
+        { label: 'Net Profit', get: r => toR(r.agg.net_profit) },
+        { label: 'Bank Deposits', get: r => toR(r.agg.cash_deposited) },
+        { label: 'Owner Withdrawals', get: r => toR(r.agg.cash_withdrawn) },
+        { label: 'Cash Transfer In', get: r => toR(r.agg.cash_transfer_in) },
+        { label: 'Cash Transfer Out', get: r => toR(r.agg.cash_transfer_out) },
+        { label: 'Float Added', get: r => toR(r.agg.float_added) },
+        { label: 'Expected Closing Cash', get: r => toR(r.agg.closing_cash_expected) },
+        { label: 'Bookings', get: r => r.agg.bookings },
+        { label: 'Redemptions', get: r => r.agg.redemptions },
+        { label: 'Guests', get: r => r.agg.guests },
+      ]
+      const csv = toCsv(flat, cols)
+      const meta = `# Aurea Spa ERP — P&L Report\n# Centre: ${centre_id === 'ALL' ? 'All Centres' : includedCentres[0]?.name || centre_id}\n# Period: ${from} to ${to} • Group: ${group}\n\n`
+      return new NextResponse(meta + csv, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/csv; charset=utf-8',
+          'Content-Disposition': `attachment; filename=spa-erp-${group}-${from}-to-${to}.csv`,
+        }
+      })
     }
 
     // ---------------- MEMBERSHIPS / GIFT CARDS ----------------

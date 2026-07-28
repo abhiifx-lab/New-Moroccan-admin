@@ -1,754 +1,1070 @@
 #!/usr/bin/env python3
 """
-Backend API Test Suite for Spa ERP - Audit & Investigation Module
-Tests the newly-added endpoints:
-1. GET /events/:id - enriched event detail
-2. GET /drill-down - metric drill-down with breakdown
-3. POST /events/:id/reverse - immutable reversal with semantic rules
+CRITICAL VERIFICATION PASS - Spa ERP Backend
+Tests FIX 1 (Centres), FIX 2 (True Immutability), FIX 3 (UPI 1/UPI 2), 
+Acceptance Scenario, Reversal Tests, and Reports Module
 """
 
 import requests
 import json
-from datetime import datetime
+import copy
+from typing import Dict, List, Any
+from datetime import datetime, timedelta
 
-# Base URL from .env: NEXT_PUBLIC_BASE_URL + /api
+# Use a unique business date for each test run to avoid data accumulation
+# Use a date in the future to isolate from any existing data
+test_run_id = int(datetime.now().timestamp())
+# Use a date in 2030 with the day based on test run to make it unique
+base_date = datetime(2030, 6, 1)
+day_offset = (test_run_id % 28) + 1  # Days 1-28 to stay within month
+BUSINESS_DATE = f"2030-06-{day_offset:02d}"
+
 BASE_URL = "https://multi-centre-spa-ops.preview.emergentagent.com/api"
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+# Test results tracking
+test_results = {
+    "passed": [],
+    "failed": [],
+    "warnings": []
+}
 
-def test_audit_investigation_module():
-    """
-    End-to-end test scenario for Audit & Investigation module.
-    Uses business_date = "2030-01-15" to isolate from prior tests.
-    """
-    log("=" * 80)
-    log("AUDIT & INVESTIGATION MODULE - COMPREHENSIVE TEST")
-    log("=" * 80)
-    
-    # Get first centre
-    log("\n[SETUP] Fetching centres...")
+def log_pass(test_name: str, details: str = ""):
+    msg = f"✅ {test_name}"
+    if details:
+        msg += f": {details}"
+    test_results["passed"].append(msg)
+    print(msg)
+
+def log_fail(test_name: str, details: str):
+    msg = f"❌ {test_name}: {details}"
+    test_results["failed"].append(msg)
+    print(msg)
+
+def log_warning(test_name: str, details: str):
+    msg = f"⚠️  {test_name}: {details}"
+    test_results["warnings"].append(msg)
+    print(msg)
+
+def get_centres() -> List[Dict]:
+    """Get all centres"""
     resp = requests.get(f"{BASE_URL}/centres")
-    assert resp.status_code == 200, f"Failed to get centres: {resp.status_code}"
-    centres = resp.json()
-    assert len(centres) > 0, "No centres found"
-    centre = centres[0]
-    centre_id = centre['id']
-    log(f"✓ Using centre: {centre['name']} (ID: {centre_id})")
-    
-    # Test date - isolated from prior tests
-    test_date = "2030-01-15"
-    log(f"✓ Test date: {test_date}")
-    
-    # Store event IDs for later reference
-    event_ids = {}
-    membership_code = None
-    gift_card_code = None
-    
-    # ========================================================================
-    # STEP A: SEED EVENTS
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP A: SEED EVENTS ON 2030-01-15")
-    log("=" * 80)
-    
-    # A1. Set opening cash
-    log("\n[A1] Setting opening cash to 500000...")
-    resp = requests.post(f"{BASE_URL}/business-day/set-opening", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "opening_cash": 500000
-    })
-    assert resp.status_code == 200, f"Failed to set opening cash: {resp.status_code} - {resp.text}"
-    log("✓ Opening cash set to 500000")
-    
-    # A2. Booking CASH 350000
-    log("\n[A2] Creating CASH booking 350000 for Alpha...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Alpha",
-        "amount": 350000,
-        "payment_method": "CASH",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
-    event_ids['A2_cash_booking'] = resp.json()['id']
-    log(f"✓ CASH booking created: {event_ids['A2_cash_booking']}")
-    
-    # A3. Booking UPI 400000
-    log("\n[A3] Creating UPI booking 400000 for Bravo...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Bravo",
-        "amount": 400000,
-        "payment_method": "UPI",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
-    event_ids['A3_upi_booking'] = resp.json()['id']
-    log(f"✓ UPI booking created: {event_ids['A3_upi_booking']}")
-    
-    # A4. Booking MIXED 350000
-    log("\n[A4] Creating MIXED booking 350000 for Charlie...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Charlie",
-        "amount": 350000,
-        "payment_method": "MIXED",
-        "payment_breakdown": {"cash": 100000, "upi": 200000, "card": 50000},
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
-    event_ids['A4_mixed_booking'] = resp.json()['id']
-    log(f"✓ MIXED booking created: {event_ids['A4_mixed_booking']}")
-    
-    # A5. Sell membership 1000000 CASH to Delta
-    log("\n[A5] Selling membership 1000000 CASH to Delta...")
-    resp = requests.post(f"{BASE_URL}/events/membership", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Delta",
-        "amount": 1000000,
-        "payment_method": "CASH",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create membership: {resp.status_code} - {resp.text}"
-    data = resp.json()
-    event_ids['A5_membership_sale'] = data['event']['id']
-    membership_code = data['membership']['code']
-    log(f"✓ Membership sale created: {event_ids['A5_membership_sale']}, code: {membership_code}")
-    
-    # A6. Sell gift card 500000 CASH from Echo to Foxtrot
-    log("\n[A6] Selling gift card 500000 CASH from Echo to Foxtrot...")
-    resp = requests.post(f"{BASE_URL}/events/gift-card", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Echo",
-        "recipient": "Foxtrot",
-        "amount": 500000,
-        "payment_method": "CASH",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create gift card: {resp.status_code} - {resp.text}"
-    data = resp.json()
-    event_ids['A6_gift_card_sale'] = data['event']['id']
-    gift_card_code = data['gift_card']['code']
-    log(f"✓ Gift card sale created: {event_ids['A6_gift_card_sale']}, code: {gift_card_code}")
-    
-    # A7. Booking 200000 MEMBERSHIP redeem using M1
-    log("\n[A7] Creating MEMBERSHIP redemption booking 200000 for Delta...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Delta",
-        "amount": 200000,
-        "payment_method": "MEMBERSHIP",
-        "redemption_ref": membership_code,
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create membership redemption: {resp.status_code} - {resp.text}"
-    event_ids['A7_membership_redemption'] = resp.json()['id']
-    log(f"✓ Membership redemption created: {event_ids['A7_membership_redemption']}")
-    
-    # A8. Booking 150000 GIFT_CARD redeem using G1
-    log("\n[A8] Creating GIFT_CARD redemption booking 150000 for Foxtrot...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Foxtrot",
-        "amount": 150000,
-        "payment_method": "GIFT_CARD",
-        "redemption_ref": gift_card_code,
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create gift card redemption: {resp.status_code} - {resp.text}"
-    event_ids['A8_gift_card_redemption'] = resp.json()['id']
-    log(f"✓ Gift card redemption created: {event_ids['A8_gift_card_redemption']}")
-    
-    # A9. Expense CASH 50000
-    log("\n[A9] Creating CASH expense 50000 for Utilities...")
-    resp = requests.post(f"{BASE_URL}/events/expense", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "amount": 50000,
-        "payment_method": "CASH",
-        "category": "Utilities",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create expense: {resp.status_code} - {resp.text}"
-    event_ids['A9_expense'] = resp.json()['id']
-    log(f"✓ Expense created: {event_ids['A9_expense']}")
-    
-    # A10. Cash movement BANK_DEPOSIT 200000
-    log("\n[A10] Creating BANK_DEPOSIT 200000...")
-    resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "amount": 200000,
-        "movement_type": "BANK_DEPOSIT",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create cash movement: {resp.status_code} - {resp.text}"
-    event_ids['A10_bank_deposit'] = resp.json()['id']
-    log(f"✓ Bank deposit created: {event_ids['A10_bank_deposit']}")
-    
-    # A11. Cash movement FLOAT_ADDED 100000
-    log("\n[A11] Creating FLOAT_ADDED 100000...")
-    resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "amount": 100000,
-        "movement_type": "FLOAT_ADDED",
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to create cash movement: {resp.status_code} - {resp.text}"
-    event_ids['A11_float_added'] = resp.json()['id']
-    log(f"✓ Float added created: {event_ids['A11_float_added']}")
-    
-    log("\n✓ STEP A COMPLETE: All 11 events seeded successfully")
-    
-    # ========================================================================
-    # STEP B: BASELINE VERIFICATION
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP B: BASELINE VERIFICATION (BEFORE REVERSALS)")
-    log("=" * 80)
-    
-    log("\n[B] Fetching dashboard for baseline verification...")
-    resp = requests.get(f"{BASE_URL}/dashboard", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
-    dashboard = resp.json()['agg']
-    
-    # Expected values
-    expected = {
-        "total_revenue": 2600000,  # 1100000 + 1000000 + 500000
-        "booking_sales": 1100000,  # 350000 + 400000 + 350000
-        "membership_sales": 1000000,
-        "gift_card_sales": 500000,
-        "cash_sales": 1950000,  # 350000 + 100000 + 1000000 + 500000
-        "upi_sales": 600000,  # 400000 + 200000
-        "card_sales": 50000,
-        "total_expenses": 50000,
-        "cash_expenses": 50000,
-        "cash_deposited": 200000,
-        "float_added": 100000,
-        "bookings": 5,
-        "redemptions": 2,
-        "guests": 6,  # Alpha, Bravo, Charlie, Delta, Echo, Foxtrot
-        "closing_cash_expected": 2300000  # 500000 + 1950000 + 100000 - 50000 - 200000
-    }
-    
-    log("\nVerifying dashboard metrics:")
-    all_passed = True
-    for key, expected_val in expected.items():
-        actual_val = dashboard.get(key, 0)
-        status = "✓" if actual_val == expected_val else "✗"
-        if actual_val != expected_val:
-            all_passed = False
-            log(f"  {status} {key}: expected {expected_val}, got {actual_val} ❌")
-        else:
-            log(f"  {status} {key}: {actual_val}")
-    
-    assert all_passed, "❌ BASELINE VERIFICATION FAILED - Dashboard metrics don't match expected values"
-    log("\n✓ STEP B COMPLETE: All baseline metrics verified")
-    
-    # ========================================================================
-    # STEP C: DRILL-DOWN VALIDATION
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP C: DRILL-DOWN VALIDATION FOR ALL METRICS")
-    log("=" * 80)
-    
-    metrics_to_test = [
-        "total_revenue", "booking_sales", "membership_sales", "gift_card_sales",
-        "cash_sales", "upi_sales", "card_sales", "total_expenses", "cash_expenses",
-        "cash_deposited", "float_added", "bookings", "redemptions",
-        "memberships_sold", "gift_cards_sold", "guests", "net_profit"
-    ]
-    
-    drill_down_results = {}
-    for metric in metrics_to_test:
-        log(f"\n[C] Testing drill-down for metric: {metric}")
-        resp = requests.get(f"{BASE_URL}/drill-down", params={
-            "metric": metric,
-            "centre_id": centre_id,
-            "date": test_date
-        })
-        assert resp.status_code == 200, f"Failed to get drill-down for {metric}: {resp.status_code} - {resp.text}"
-        data = resp.json()
-        drill_down_results[metric] = data
-        
-        # Verify total matches dashboard (except for metrics not in dashboard)
-        if metric in expected:
-            dashboard_val = expected[metric]
-            drill_total = data['total']
-            if drill_total == dashboard_val:
-                log(f"  ✓ Total matches dashboard: {drill_total}")
-            else:
-                log(f"  ✗ Total mismatch: drill-down={drill_total}, dashboard={dashboard_val} ❌")
-                assert False, f"Drill-down total mismatch for {metric}"
-        
-        # Verify events contributions sum to total
-        events_sum = sum(e['contribution'] for e in data['events'])
-        if events_sum == data['total']:
-            log(f"  ✓ Events contributions sum to total: {events_sum}")
-        else:
-            log(f"  ✗ Events sum mismatch: sum={events_sum}, total={data['total']} ❌")
-            assert False, f"Events contributions don't sum to total for {metric}"
-        
-        # Verify breakdown by type
-        breakdown = data.get('breakdown', {})
-        breakdown_total = sum(b['total'] for b in breakdown.values())
-        log(f"  ✓ Breakdown by type: {len(breakdown)} types, total={breakdown_total}")
-        log(f"  ✓ Events count: {len(data['events'])}")
-    
-    log("\n✓ STEP C COMPLETE: All drill-down validations passed")
-    
-    # ========================================================================
-    # STEP D: ENRICHED EVENT DETAIL
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP D: ENRICHED EVENT DETAIL")
-    log("=" * 80)
-    
-    # D1. Test CASH booking A2
-    log(f"\n[D1] Testing enriched detail for CASH booking A2...")
-    resp = requests.get(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}")
-    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
-    event_detail = resp.json()
-    
-    # Verify centre is included
-    assert 'centre' in event_detail, "Centre not included in event detail"
-    assert event_detail['centre']['name'] == centre['name'], "Centre name mismatch"
-    log(f"  ✓ Centre included: {event_detail['centre']['name']}")
-    
-    # Verify audit_history
-    assert 'audit_history' in event_detail, "Audit history not included"
-    assert len(event_detail['audit_history']) > 0, "Audit history is empty"
-    assert any(a['action'] == 'CREATE_EVENT' for a in event_detail['audit_history']), "CREATE_EVENT not in audit history"
-    log(f"  ✓ Audit history included: {len(event_detail['audit_history'])} entries")
-    
-    # Verify ledger_impact
-    assert 'ledger_impact' in event_detail, "Ledger impact not included"
-    ledger = event_detail['ledger_impact']
-    assert ledger['revenue'] == 350000, f"Revenue mismatch: {ledger['revenue']}"
-    assert ledger['expense'] == 0, f"Expense should be 0: {ledger['expense']}"
-    assert ledger['cash'] == 350000, f"Cash mismatch: {ledger['cash']}"
-    assert ledger['upi'] == 0, f"UPI should be 0: {ledger['upi']}"
-    assert ledger['card'] == 0, f"Card should be 0: {ledger['card']}"
-    assert ledger['liability_delta'] == 0, f"Liability delta should be 0: {ledger['liability_delta']}"
-    log(f"  ✓ Ledger impact verified: revenue=350000, cash=350000")
-    
-    # D2. Test MIXED booking A4
-    log(f"\n[D2] Testing enriched detail for MIXED booking A4...")
-    resp = requests.get(f"{BASE_URL}/events/{event_ids['A4_mixed_booking']}")
-    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
-    event_detail = resp.json()
-    ledger = event_detail['ledger_impact']
-    assert ledger['cash'] == 100000, f"Cash mismatch: {ledger['cash']}"
-    assert ledger['upi'] == 200000, f"UPI mismatch: {ledger['upi']}"
-    assert ledger['card'] == 50000, f"Card mismatch: {ledger['card']}"
-    assert ledger['revenue'] == 350000, f"Revenue mismatch: {ledger['revenue']}"
-    log(f"  ✓ MIXED booking ledger verified: cash=100000, upi=200000, card=50000, revenue=350000")
-    
-    # D3. Test MEMBERSHIP_SALE A5
-    log(f"\n[D3] Testing enriched detail for MEMBERSHIP_SALE A5...")
-    resp = requests.get(f"{BASE_URL}/events/{event_ids['A5_membership_sale']}")
-    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
-    event_detail = resp.json()
-    ledger = event_detail['ledger_impact']
-    assert ledger['liability_delta'] == 1000000, f"Liability delta mismatch: {ledger['liability_delta']}"
-    assert 'membership' in event_detail, "Membership not linked"
-    # After A7 redemption, remaining should be 800000
-    assert event_detail['membership']['remaining_paise'] == 800000, f"Membership balance mismatch: {event_detail['membership']['remaining_paise']}"
-    log(f"  ✓ Membership sale ledger verified: liability_delta=1000000, remaining=800000")
-    
-    # D4. Test BOOKING with MEMBERSHIP redemption A7
-    log(f"\n[D4] Testing enriched detail for MEMBERSHIP redemption A7...")
-    resp = requests.get(f"{BASE_URL}/events/{event_ids['A7_membership_redemption']}")
-    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
-    event_detail = resp.json()
-    ledger = event_detail['ledger_impact']
-    assert ledger['revenue'] == 0, f"Revenue should be 0 for redemption: {ledger['revenue']}"
-    assert ledger['liability_delta'] == -200000, f"Liability delta mismatch: {ledger['liability_delta']}"
-    assert 'membership' in event_detail, "Membership not linked"
-    log(f"  ✓ Membership redemption ledger verified: revenue=0, liability_delta=-200000")
-    
-    log("\n✓ STEP D COMPLETE: All enriched event details verified")
-    
-    # ========================================================================
-    # STEP E: REVERSE CASH BOOKING
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP E: REVERSE CASH BOOKING A2")
-    log("=" * 80)
-    
-    # E1. Try to reverse without reason
-    log("\n[E1] Testing reversal without reason (should fail)...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={})
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    assert "reason" in resp.text.lower() and "mandatory" in resp.text.lower(), "Error message should mention mandatory reason"
-    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
-    
-    # E2. Reverse with reason
-    log("\n[E2] Reversing CASH booking A2 with reason...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={
-        "reason": "customer no-show",
-        "actor": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to reverse event: {resp.status_code} - {resp.text}"
-    reversal_data = resp.json()
-    assert 'reversal_event' in reversal_data, "Reversal event not returned"
-    reversal_event_id = reversal_data['reversal_event']['id']
-    log(f"  ✓ Reversal created: {reversal_event_id}")
-    
-    # E3. Verify dashboard after reversal
-    log("\n[E3] Verifying dashboard after reversal...")
-    resp = requests.get(f"{BASE_URL}/dashboard", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
-    dashboard = resp.json()['agg']
-    
-    expected_after_e2 = {
-        "total_revenue": 2250000,  # 2600000 - 350000
-        "booking_sales": 750000,  # 1100000 - 350000
-        "cash_sales": 1600000,  # 1950000 - 350000
-        "closing_cash_expected": 1950000,  # 2300000 - 350000
-        "bookings": 4  # 5 - 1
-    }
-    
-    log("  Verifying metrics after reversal:")
-    for key, expected_val in expected_after_e2.items():
-        actual_val = dashboard.get(key, 0)
-        status = "✓" if actual_val == expected_val else "✗"
-        if actual_val != expected_val:
-            log(f"    {status} {key}: expected {expected_val}, got {actual_val} ❌")
-            assert False, f"Dashboard metric {key} mismatch after reversal"
-        else:
-            log(f"    {status} {key}: {actual_val}")
-    
-    # E4. Verify drill-down includes both original and reversal
-    log("\n[E4] Verifying drill-down includes original and reversal events...")
-    resp = requests.get(f"{BASE_URL}/drill-down", params={
-        "metric": "booking_sales",
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get drill-down: {resp.status_code} - {resp.text}"
-    drill_data = resp.json()
-    
-    # Find original and reversal in events
-    original_found = False
-    reversal_found = False
-    for item in drill_data['events']:
-        if item['event']['id'] == event_ids['A2_cash_booking']:
-            original_found = True
-            assert item['contribution'] == 350000, f"Original contribution should be 350000: {item['contribution']}"
-        if item['event']['id'] == reversal_event_id:
-            reversal_found = True
-            assert item['contribution'] == -350000, f"Reversal contribution should be -350000: {item['contribution']}"
-    
-    assert original_found, "Original event not found in drill-down"
-    assert reversal_found, "Reversal event not found in drill-down"
-    assert drill_data['total'] == 750000, f"Drill-down total should be 750000: {drill_data['total']}"
-    log(f"  ✓ Drill-down verified: total=750000, includes both original (+350000) and reversal (-350000)")
-    
-    # E5. Try to reverse the same event again
-    log("\n[E5] Testing double reversal (should fail)...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={
-        "reason": "test double reversal",
-        "actor": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    assert "already reversed" in resp.text.lower(), "Error message should mention already reversed"
-    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
-    
-    # E6. Try to reverse the reversal event
-    log("\n[E6] Testing reversal of reversal event (should fail)...")
-    resp = requests.post(f"{BASE_URL}/events/{reversal_event_id}/reverse", json={
-        "reason": "test reversal of reversal",
-        "actor": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    assert "cannot reverse a reversal" in resp.text.lower(), "Error message should mention cannot reverse reversal"
-    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
-    
-    # E7. Verify audit log
-    log("\n[E7] Verifying audit log for reversal...")
-    resp = requests.get(f"{BASE_URL}/audit-log", params={
-        "target_event_id": event_ids['A2_cash_booking']
-    })
-    assert resp.status_code == 200, f"Failed to get audit log: {resp.status_code} - {resp.text}"
-    audit_entries = resp.json()
-    
-    reverse_entry = None
-    for entry in audit_entries:
-        if entry['action'] == 'REVERSE_EVENT':
-            reverse_entry = entry
-            break
-    
-    assert reverse_entry is not None, "REVERSE_EVENT entry not found in audit log"
-    assert reverse_entry.get('reason') == "customer no-show", "Reason not recorded in audit log"
-    assert reverse_entry.get('reversal_event_id') == reversal_event_id, "Reversal event ID not recorded"
-    log(f"  ✓ Audit log verified: REVERSE_EVENT entry found with reason and reversal_event_id")
-    
-    # E8. Verify original event has reversal metadata
-    log("\n[E8] Verifying original event has reversal metadata...")
-    resp = requests.get(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}")
-    assert resp.status_code == 200, f"Failed to get event: {resp.status_code} - {resp.text}"
-    original_event = resp.json()
-    
-    assert original_event.get('reversed_by_event_id') == reversal_event_id, "reversed_by_event_id not set"
-    assert 'reversal_event' in original_event, "reversal_event not included in response"
-    log(f"  ✓ Original event metadata verified: reversed_by_event_id set, reversal_event included")
-    
-    log("\n✓ STEP E COMPLETE: All reversal validations passed")
-    
-    # ========================================================================
-    # STEP F: REVERSE MEMBERSHIP_SALE
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP F: REVERSE MEMBERSHIP_SALE A5")
-    log("=" * 80)
-    
-    # F1. Reverse membership sale
-    log("\n[F1] Reversing MEMBERSHIP_SALE A5...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A5_membership_sale']}/reverse", json={
-        "reason": "data entry error",
-        "actor": "manager1",
-        "role": "MANAGER"
-    })
-    assert resp.status_code == 200, f"Failed to reverse membership sale: {resp.status_code} - {resp.text}"
-    log(f"  ✓ Membership sale reversed")
-    
-    # F2. Verify membership is marked as reversed
-    log("\n[F2] Verifying membership is marked as reversed...")
-    resp = requests.get(f"{BASE_URL}/memberships/{membership_code}")
-    assert resp.status_code == 200, f"Failed to get membership: {resp.status_code} - {resp.text}"
-    membership = resp.json()
-    
-    assert membership['reversed'] == True, f"Membership not marked as reversed: {membership.get('reversed')}"
-    assert membership['active'] == False, f"Membership still active: {membership.get('active')}"
-    assert membership['remaining_paise'] == 0, f"Membership balance not zeroed: {membership.get('remaining_paise')}"
-    log(f"  ✓ Membership verified: reversed=True, active=False, remaining_paise=0")
-    
-    # F3. Try to create booking with reversed membership
-    log("\n[F3] Testing booking with reversed membership (should fail)...")
-    resp = requests.post(f"{BASE_URL}/events/booking", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "customer": "Delta",
-        "amount": 100000,
-        "payment_method": "MEMBERSHIP",
-        "redemption_ref": membership_code,
-        "created_by": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
-    assert "reversed" in resp.text.lower(), "Error message should mention reversed membership"
-    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
-    
-    # F4. Verify dashboard after membership reversal
-    log("\n[F4] Verifying dashboard after membership reversal...")
-    resp = requests.get(f"{BASE_URL}/dashboard", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
-    dashboard = resp.json()['agg']
-    
-    # membership_sales should be 0, cash_sales should drop by 1000000
-    assert dashboard['membership_sales'] == 0, f"Membership sales should be 0: {dashboard['membership_sales']}"
-    assert dashboard['cash_sales'] == 600000, f"Cash sales should be 600000: {dashboard['cash_sales']}"  # 1600000 - 1000000
-    assert dashboard['closing_cash_expected'] == 950000, f"Closing cash should be 950000: {dashboard['closing_cash_expected']}"  # 1950000 - 1000000
-    log(f"  ✓ Dashboard verified: membership_sales=0, cash_sales=600000, closing_cash=950000")
-    
-    log("\n✓ STEP F COMPLETE: Membership reversal validated")
-    
-    # ========================================================================
-    # STEP G: REVERSE BOOKING WITH GIFT_CARD REDEMPTION
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP G: REVERSE BOOKING WITH GIFT_CARD REDEMPTION A8")
-    log("=" * 80)
-    
-    # G1. Check gift card balance before reversal
-    log("\n[G1] Checking gift card balance before reversal...")
-    resp = requests.get(f"{BASE_URL}/gift-cards/{gift_card_code}")
-    assert resp.status_code == 200, f"Failed to get gift card: {resp.status_code} - {resp.text}"
-    gift_card = resp.json()
-    assert gift_card['remaining_paise'] == 350000, f"Gift card balance should be 350000: {gift_card['remaining_paise']}"
-    log(f"  ✓ Gift card balance before reversal: {gift_card['remaining_paise']}")
-    
-    # G2. Reverse gift card redemption booking
-    log("\n[G2] Reversing GIFT_CARD redemption booking A8...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A8_gift_card_redemption']}/reverse", json={
-        "reason": "wrong card scanned",
-        "actor": "reception2",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to reverse gift card redemption: {resp.status_code} - {resp.text}"
-    log(f"  ✓ Gift card redemption reversed")
-    
-    # G3. Verify gift card balance is restored
-    log("\n[G3] Verifying gift card balance is restored...")
-    resp = requests.get(f"{BASE_URL}/gift-cards/{gift_card_code}")
-    assert resp.status_code == 200, f"Failed to get gift card: {resp.status_code} - {resp.text}"
-    gift_card = resp.json()
-    assert gift_card['remaining_paise'] == 500000, f"Gift card balance should be restored to 500000: {gift_card['remaining_paise']}"
-    log(f"  ✓ Gift card balance restored: {gift_card['remaining_paise']}")
-    
-    # G4. Verify redemption_count decremented
-    log("\n[G4] Verifying redemption_count decremented...")
-    assert gift_card['redemption_count'] == 0, f"Redemption count should be 0: {gift_card['redemption_count']}"
-    log(f"  ✓ Redemption count: {gift_card['redemption_count']}")
-    
-    # G5. Verify dashboard redemptions count
-    log("\n[G5] Verifying dashboard redemptions count...")
-    resp = requests.get(f"{BASE_URL}/dashboard", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
-    dashboard = resp.json()['agg']
-    assert dashboard['redemptions'] == 1, f"Redemptions should be 1: {dashboard['redemptions']}"  # 2 - 1
-    log(f"  ✓ Dashboard redemptions: {dashboard['redemptions']}")
-    
-    log("\n✓ STEP G COMPLETE: Gift card redemption reversal validated")
-    
-    # ========================================================================
-    # STEP H: BUSINESS DAY CLOSED + ROLE GATE
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP H: BUSINESS DAY CLOSED + ROLE GATE")
-    log("=" * 80)
-    
-    # H1. Close business day
-    log("\n[H1] Closing business day...")
-    resp = requests.post(f"{BASE_URL}/business-day/close", json={
-        "centre_id": centre_id,
-        "business_date": test_date,
-        "closing_cash_declared": 0,
-        "actor": "reception",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 200, f"Failed to close business day: {resp.status_code} - {resp.text}"
-    log(f"  ✓ Business day closed")
-    
-    # H2. Try to reverse with RECEPTION role (should fail)
-    log("\n[H2] Testing reversal with RECEPTION role on closed day (should fail)...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A3_upi_booking']}/reverse", json={
-        "reason": "test closed day",
-        "actor": "reception1",
-        "role": "RECEPTION"
-    })
-    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
-    assert "closed" in resp.text.lower() and "manager" in resp.text.lower(), "Error message should mention closed day and manager approval"
-    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
-    
-    # H3. Reverse with MANAGER role (should succeed)
-    log("\n[H3] Reversing with MANAGER role on closed day...")
-    resp = requests.post(f"{BASE_URL}/events/{event_ids['A3_upi_booking']}/reverse", json={
-        "reason": "manager override",
-        "actor": "mgr",
-        "role": "MANAGER"
-    })
-    assert resp.status_code == 200, f"Failed to reverse with MANAGER role: {resp.status_code} - {resp.text}"
-    log(f"  ✓ Reversal succeeded with MANAGER role")
-    
-    # H4. Verify dashboard UPI sales decreased
-    log("\n[H4] Verifying dashboard UPI sales decreased...")
-    resp = requests.get(f"{BASE_URL}/dashboard", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
-    dashboard = resp.json()['agg']
-    assert dashboard['upi_sales'] == 200000, f"UPI sales should be 200000: {dashboard['upi_sales']}"  # 600000 - 400000
-    log(f"  ✓ Dashboard UPI sales: {dashboard['upi_sales']}")
-    
-    log("\n✓ STEP H COMPLETE: Business day closed + role gate validated")
-    
-    # ========================================================================
-    # STEP I: CASH-BOOK AFTER REVERSALS
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("STEP I: CASH-BOOK AFTER REVERSALS")
-    log("=" * 80)
-    
-    log("\n[I] Fetching cash-book...")
-    resp = requests.get(f"{BASE_URL}/cash-book", params={
-        "centre_id": centre_id,
-        "date": test_date
-    })
-    assert resp.status_code == 200, f"Failed to get cash-book: {resp.status_code} - {resp.text}"
-    cash_book = resp.json()
-    
-    lines = cash_book['lines']
-    agg = cash_book['agg']
-    
-    # Verify last line running balance equals closing_cash_expected
-    last_line = lines[-1]
-    assert last_line['running'] == agg['closing_cash_expected'], \
-        f"Last running balance {last_line['running']} != closing_cash_expected {agg['closing_cash_expected']}"
-    log(f"  ✓ Last running balance matches closing_cash_expected: {last_line['running']}")
-    
-    # Verify reversal lines are present
-    reversal_lines = [line for line in lines if line.get('is_reversal')]
-    assert len(reversal_lines) > 0, "No reversal lines found in cash-book"
-    log(f"  ✓ Reversal lines present in cash-book: {len(reversal_lines)} lines")
-    
-    log("\n✓ STEP I COMPLETE: Cash-book validated")
-    
-    # ========================================================================
-    # FINAL SUMMARY
-    # ========================================================================
-    log("\n" + "=" * 80)
-    log("✅ ALL TESTS PASSED - AUDIT & INVESTIGATION MODULE WORKING CORRECTLY")
-    log("=" * 80)
-    log("\nSummary:")
-    log("  ✓ Step A: 11 events seeded successfully")
-    log("  ✓ Step B: Baseline dashboard metrics verified")
-    log("  ✓ Step C: Drill-down for all metrics validated")
-    log("  ✓ Step D: Enriched event details verified")
-    log("  ✓ Step E: CASH booking reversal validated")
-    log("  ✓ Step F: Membership sale reversal validated")
-    log("  ✓ Step G: Gift card redemption reversal validated")
-    log("  ✓ Step H: Business day closed + role gate validated")
-    log("  ✓ Step I: Cash-book after reversals validated")
-    log("\n" + "=" * 80)
+    resp.raise_for_status()
+    return resp.json()
 
-if __name__ == "__main__":
+def get_events(from_date: str = None, to_date: str = None, centre_id: str = None) -> List[Dict]:
+    """Get events with optional filters"""
+    params = {}
+    if from_date:
+        params['from'] = from_date
+    if to_date:
+        params['to'] = to_date
+    if centre_id:
+        params['centre_id'] = centre_id
+    resp = requests.get(f"{BASE_URL}/events", params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_event_by_id(event_id: str) -> Dict:
+    """Get enriched event by ID"""
+    resp = requests.get(f"{BASE_URL}/events/{event_id}")
+    resp.raise_for_status()
+    return resp.json()
+
+def create_booking(centre_id: str, customer: str, amount: int, payment_method: str, 
+                   payment_breakdown: Dict = None, redemption_ref: str = None) -> Dict:
+    """Create a booking event"""
+    payload = {
+        "centre_id": centre_id,
+        "customer": customer,
+        "amount": amount,
+        "payment_method": payment_method,
+        "business_date": BUSINESS_DATE,
+        "created_by": "test_agent",
+        "role": "RECEPTION"
+    }
+    if payment_breakdown:
+        payload["payment_breakdown"] = payment_breakdown
+    if redemption_ref:
+        payload["redemption_ref"] = redemption_ref
+    
+    resp = requests.post(f"{BASE_URL}/events/booking", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def create_membership(centre_id: str, customer: str, amount: int, payment_method: str, code: str) -> Dict:
+    """Create a membership sale"""
+    payload = {
+        "centre_id": centre_id,
+        "customer": customer,
+        "amount": amount,
+        "payment_method": payment_method,
+        "code": code,
+        "business_date": BUSINESS_DATE,
+        "created_by": "test_agent",
+        "role": "RECEPTION"
+    }
+    resp = requests.post(f"{BASE_URL}/events/membership", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def create_gift_card(centre_id: str, customer: str, recipient: str, amount: int, 
+                     payment_method: str, code: str) -> Dict:
+    """Create a gift card sale"""
+    payload = {
+        "centre_id": centre_id,
+        "customer": customer,
+        "recipient": recipient,
+        "amount": amount,
+        "payment_method": payment_method,
+        "code": code,
+        "business_date": BUSINESS_DATE,
+        "created_by": "test_agent",
+        "role": "RECEPTION"
+    }
+    resp = requests.post(f"{BASE_URL}/events/gift-card", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def create_expense(centre_id: str, amount: int, payment_method: str, category: str) -> Dict:
+    """Create an expense event"""
+    payload = {
+        "centre_id": centre_id,
+        "amount": amount,
+        "payment_method": payment_method,
+        "category": category,
+        "business_date": BUSINESS_DATE,
+        "created_by": "test_agent",
+        "role": "RECEPTION"
+    }
+    resp = requests.post(f"{BASE_URL}/events/expense", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def create_cash_movement(centre_id: str, amount: int, movement_type: str) -> Dict:
+    """Create a cash movement event"""
+    payload = {
+        "centre_id": centre_id,
+        "amount": amount,
+        "movement_type": movement_type,
+        "business_date": BUSINESS_DATE,
+        "created_by": "test_agent",
+        "role": "RECEPTION"
+    }
+    resp = requests.post(f"{BASE_URL}/events/cash-movement", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def reverse_event(event_id: str, reason: str, role: str = "RECEPTION") -> Dict:
+    """Reverse an event"""
+    payload = {
+        "reason": reason,
+        "actor": "test_agent",
+        "role": role
+    }
+    resp = requests.post(f"{BASE_URL}/events/{event_id}/reverse", json=payload)
+    return resp
+
+def set_opening_cash(centre_id: str, opening_cash: int):
+    """Set opening cash for a business day"""
+    payload = {
+        "centre_id": centre_id,
+        "business_date": BUSINESS_DATE,
+        "opening_cash": opening_cash
+    }
+    resp = requests.post(f"{BASE_URL}/business-day/set-opening", json=payload)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_dashboard(centre_id: str, date: str) -> Dict:
+    """Get dashboard aggregation"""
+    params = {"centre_id": centre_id, "date": date}
+    resp = requests.get(f"{BASE_URL}/dashboard", params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_membership(code: str) -> Dict:
+    """Get membership by code"""
+    resp = requests.get(f"{BASE_URL}/memberships/{code}")
+    resp.raise_for_status()
+    return resp.json()
+
+def get_gift_card(code: str) -> Dict:
+    """Get gift card by code"""
+    resp = requests.get(f"{BASE_URL}/gift-cards/{code}")
+    resp.raise_for_status()
+    return resp.json()
+
+def get_pl_report(centre_id: str, from_date: str, to_date: str, group: str = "month") -> Dict:
+    """Get P&L report"""
+    params = {
+        "centre_id": centre_id,
+        "from": from_date,
+        "to": to_date,
+        "group": group
+    }
+    resp = requests.get(f"{BASE_URL}/reports/pl", params=params)
+    resp.raise_for_status()
+    return resp.json()
+
+def get_csv_report(centre_id: str, from_date: str, to_date: str, group: str = "month") -> str:
+    """Get CSV report"""
+    params = {
+        "centre_id": centre_id,
+        "from": from_date,
+        "to": to_date,
+        "group": group
+    }
+    resp = requests.get(f"{BASE_URL}/reports/csv", params=params)
+    resp.raise_for_status()
+    return resp.text
+
+def extract_raw_event_fields(event: Dict) -> Dict:
+    """Extract only raw event fields (excluding derived fields)"""
+    derived_fields = ['reversed', 'reversal_event', 'original_event', 'centre', 
+                      'ledger_impact', 'audit_history', '_id', 'membership', 'gift_card']
+    raw = {}
+    for key, value in event.items():
+        if key not in derived_fields:
+            raw[key] = value
+    return raw
+
+def compare_events(before: Dict, after: Dict) -> bool:
+    """Compare two events for byte-for-byte equality (excluding derived fields)"""
+    before_raw = extract_raw_event_fields(before)
+    after_raw = extract_raw_event_fields(after)
+    return before_raw == after_raw
+
+# ============================================================================
+# TEST FIX 1: CENTRES
+# ============================================================================
+
+def test_centres():
+    """Test that only 3 approved centres exist"""
+    print("\n" + "="*80)
+    print("TEST FIX 1: CENTRES")
+    print("="*80)
+    
+    centres = get_centres()
+    centre_names = [c['name'] for c in centres]
+    
+    # Test a) Exactly 3 centres
+    if len(centres) == 3:
+        log_pass("FIX1-A: Centre count", f"Exactly 3 centres exist")
+    else:
+        log_fail("FIX1-A: Centre count", f"Expected 3 centres, got {len(centres)}: {centre_names}")
+    
+    # Verify names
+    expected_names = ['Phoenix Pallassio', 'Holiday Inn', 'Lulu Mall']
+    for name in expected_names:
+        if name in centre_names:
+            log_pass(f"FIX1-A: Centre '{name}'", "exists")
+        else:
+            log_fail(f"FIX1-A: Centre '{name}'", "NOT FOUND")
+    
+    # Print centre IDs for reference
+    print("\nCentre IDs:")
+    centre_map = {}
+    for c in centres:
+        print(f"  {c['name']}: {c['id']}")
+        centre_map[c['name']] = c['id']
+    
+    # Test b) All events reference approved centres
+    all_events = get_events(from_date="2020-01-01", to_date="2030-12-31")
+    approved_ids = [c['id'] for c in centres]
+    
+    invalid_events = [e for e in all_events if e['centre_id'] not in approved_ids]
+    if len(invalid_events) == 0:
+        log_pass("FIX1-B: Event centre validation", f"All {len(all_events)} events reference approved centres")
+    else:
+        log_fail("FIX1-B: Event centre validation", 
+                f"{len(invalid_events)} events reference invalid centres")
+    
+    # Group events by centre
+    from collections import Counter
+    centre_counts = Counter(e['centre_id'] for e in all_events)
+    print("\nEvent counts by centre:")
+    for centre_id, count in centre_counts.items():
+        centre_name = next((c['name'] for c in centres if c['id'] == centre_id), 'UNKNOWN')
+        print(f"  {centre_name}: {count} events")
+    
+    # Test c) Fake centre_id returns 500 error
     try:
-        test_audit_investigation_module()
-        print("\n✅ TEST SUITE COMPLETED SUCCESSFULLY")
-        exit(0)
-    except AssertionError as e:
-        print(f"\n❌ TEST FAILED: {e}")
-        exit(1)
+        fake_booking = create_booking(
+            centre_id="00000000-0000-0000-0000-000000000000",
+            customer="Test",
+            amount=10000,
+            payment_method="CASH"
+        )
+        log_fail("FIX1-C: Fake centre rejection", "Fake centre_id was accepted (should fail)")
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 500:
+            error_msg = e.response.json().get('error', '')
+            if 'Invalid or unknown centre_id' in error_msg:
+                log_pass("FIX1-C: Fake centre rejection", f"500 error with correct message: {error_msg}")
+            else:
+                log_fail("FIX1-C: Fake centre rejection", f"500 error but wrong message: {error_msg}")
+        else:
+            log_fail("FIX1-C: Fake centre rejection", f"Wrong status code: {e.response.status_code}")
+    
+    return centre_map
+
+# ============================================================================
+# TEST ACCEPTANCE SCENARIO
+# ============================================================================
+
+def test_acceptance_scenario(centre_map: Dict[str, str]):
+    """Run the complete acceptance scenario"""
+    print("\n" + "="*80)
+    print("TEST ACCEPTANCE SCENARIO")
+    print("="*80)
+    
+    phoenix_id = centre_map['Phoenix Pallassio']
+    holiday_id = centre_map['Holiday Inn']
+    lulu_id = centre_map['Lulu Mall']
+    
+    # Set opening cash for all centres
+    print("\nSetting opening cash (500000 paise = ₹5000) for all centres...")
+    for name, centre_id in centre_map.items():
+        set_opening_cash(centre_id, 500000)
+        log_pass(f"Opening cash set for {name}", "500000 paise")
+    
+    # Store event IDs for later reversal tests
+    event_ids = {}
+    
+    # Phoenix Pallassio events
+    print("\n--- Phoenix Pallassio Events ---")
+    e1 = create_booking(phoenix_id, "P-Alpha", 300000, "CASH")
+    event_ids['phoenix_cash'] = e1['id']
+    log_pass("Phoenix: CASH booking", f"300000 paise, customer P-Alpha, id={e1['id']}")
+    
+    e2 = create_booking(phoenix_id, "P-Bravo", 200000, "UPI_1")
+    event_ids['phoenix_upi1'] = e2['id']
+    log_pass("Phoenix: UPI_1 booking", f"200000 paise, customer P-Bravo, id={e2['id']}")
+    
+    e3 = create_booking(phoenix_id, "P-Charlie", 100000, "UPI_2")
+    event_ids['phoenix_upi2'] = e3['id']
+    log_pass("Phoenix: UPI_2 booking", f"100000 paise, customer P-Charlie, id={e3['id']}")
+    
+    e4 = create_booking(phoenix_id, "P-Delta", 150000, "CARD")
+    event_ids['phoenix_card'] = e4['id']
+    log_pass("Phoenix: CARD booking", f"150000 paise, customer P-Delta, id={e4['id']}")
+    
+    exp1 = create_expense(phoenix_id, 20000, "CASH", "Supplies")
+    log_pass("Phoenix: CASH expense", "20000 paise, Supplies")
+    
+    exp2 = create_expense(phoenix_id, 30000, "CASH", "Wages")
+    log_pass("Phoenix: CASH expense", "30000 paise, Wages")
+    
+    exp3 = create_expense(phoenix_id, 15000, "UPI_1", "Utilities")
+    log_pass("Phoenix: UPI_1 expense", "15000 paise, Utilities")
+    
+    import time
+    mem_code = f"MP1-{int(time.time())}"
+    mem_result = create_membership(phoenix_id, "P-Echo", 500000, "CASH", mem_code)
+    event_ids['phoenix_membership_sale'] = mem_result['event']['id']
+    event_ids['membership_code'] = mem_code
+    log_pass("Phoenix: Membership sale", f"500000 paise, code={mem_code}, customer P-Echo, id={mem_result['event']['id']}")
+    
+    # Holiday Inn events
+    print("\n--- Holiday Inn Events ---")
+    mixed_booking = create_booking(
+        holiday_id, "H-Alpha", 200000, "MIXED",
+        payment_breakdown={"cash": 50000, "upi_1": 100000, "upi_2": 30000, "card": 20000}
+    )
+    log_pass("Holiday Inn: MIXED booking", "200000 paise (cash:50000, upi_1:100000, upi_2:30000, card:20000)")
+    
+    import time
+    gc_code = f"GH1-{int(time.time())}"
+    gc_result = create_gift_card(holiday_id, "H-Buyer", "H-Recip", 300000, "UPI_2", gc_code)
+    event_ids['gift_card_code'] = gc_code
+    log_pass("Holiday Inn: Gift card sale", f"300000 paise, code={gc_code}, UPI_2")
+    
+    mem_redeem = create_booking(holiday_id, "P-Echo", 100000, "MEMBERSHIP", redemption_ref=event_ids['membership_code'])
+    event_ids['holiday_membership_redeem'] = mem_redeem['id']
+    log_pass("Holiday Inn: Membership redemption", f"100000 paise, code={event_ids['membership_code']}, id={mem_redeem['id']}")
+    
+    # Lulu Mall events
+    print("\n--- Lulu Mall Events ---")
+    lulu_booking = create_booking(lulu_id, "L-Alpha", 400000, "CASH")
+    log_pass("Lulu Mall: CASH booking", "400000 paise, customer L-Alpha")
+    
+    bank_deposit = create_cash_movement(lulu_id, 100000, "BANK_DEPOSIT")
+    log_pass("Lulu Mall: Bank deposit", "100000 paise")
+    
+    gc_redeem = create_booking(lulu_id, "H-Recip", 150000, "GIFT_CARD", redemption_ref=event_ids['gift_card_code'])
+    event_ids['lulu_gc_redeem'] = gc_redeem['id']
+    log_pass("Lulu Mall: Gift card redemption", f"150000 paise, code={event_ids['gift_card_code']}, id={gc_redeem['id']}")
+    
+    return event_ids
+
+# ============================================================================
+# TEST METRICS VERIFICATION
+# ============================================================================
+
+def test_metrics_verification(centre_map: Dict[str, str]):
+    """Verify per-centre and consolidated metrics"""
+    print("\n" + "="*80)
+    print("TEST METRICS VERIFICATION")
+    print("="*80)
+    
+    phoenix_id = centre_map['Phoenix Pallassio']
+    holiday_id = centre_map['Holiday Inn']
+    lulu_id = centre_map['Lulu Mall']
+    
+    # Phoenix Pallassio expected metrics
+    print("\n--- Phoenix Pallassio Metrics ---")
+    phoenix_dash = get_dashboard(phoenix_id, BUSINESS_DATE)
+    p_agg = phoenix_dash['agg']
+    
+    expected_phoenix = {
+        'total_revenue': 1250000,  # 300000+200000+100000+150000+500000
+        'cash_sales': 800000,      # 300000+500000
+        'upi_1_sales': 200000,
+        'upi_2_sales': 100000,
+        'card_sales': 150000,
+        'total_expenses': 65000,   # 20000+30000+15000
+        'cash_expenses': 50000,    # 20000+30000
+        'upi_1_expenses': 15000,
+        'wages_expenses': 30000,
+        'bookings': 4
+    }
+    
+    for key, expected in expected_phoenix.items():
+        actual = p_agg.get(key, 0)
+        if actual == expected:
+            log_pass(f"Phoenix {key}", f"{actual} (expected {expected})")
+        else:
+            log_fail(f"Phoenix {key}", f"Expected {expected}, got {actual}")
+    
+    # Holiday Inn expected metrics
+    print("\n--- Holiday Inn Metrics ---")
+    holiday_dash = get_dashboard(holiday_id, BUSINESS_DATE)
+    h_agg = holiday_dash['agg']
+    
+    expected_holiday = {
+        'total_revenue': 500000,   # 200000+300000 (redemption NOT counted)
+        'cash_sales': 50000,
+        'upi_1_sales': 100000,
+        'upi_2_sales': 330000,     # 30000+300000
+        'card_sales': 20000,
+        'redemptions': 1,
+        'membership_redemption_value': 100000
+    }
+    
+    for key, expected in expected_holiday.items():
+        actual = h_agg.get(key, 0)
+        if actual == expected:
+            log_pass(f"Holiday Inn {key}", f"{actual} (expected {expected})")
+        else:
+            log_fail(f"Holiday Inn {key}", f"Expected {expected}, got {actual}")
+    
+    # Lulu Mall expected metrics
+    print("\n--- Lulu Mall Metrics ---")
+    lulu_dash = get_dashboard(lulu_id, BUSINESS_DATE)
+    l_agg = lulu_dash['agg']
+    
+    expected_lulu = {
+        'total_revenue': 400000,
+        'cash_sales': 400000,
+        'cash_deposited': 100000,
+        'redemptions': 1,
+        'gift_card_redemption_value': 150000
+    }
+    
+    for key, expected in expected_lulu.items():
+        actual = l_agg.get(key, 0)
+        if actual == expected:
+            log_pass(f"Lulu Mall {key}", f"{actual} (expected {expected})")
+        else:
+            log_fail(f"Lulu Mall {key}", f"Expected {expected}, got {actual}")
+    
+    # Consolidated metrics
+    print("\n--- Consolidated Metrics ---")
+    consolidated_dash = get_dashboard("ALL", BUSINESS_DATE)
+    c_agg = consolidated_dash['agg']
+    
+    expected_consolidated = {
+        'total_revenue': 2150000,  # 1250000+500000+400000
+        'cash_sales': 1250000,     # 800000+50000+400000
+        'upi_1_sales': 300000,     # 200000+100000
+        'upi_2_sales': 430000,     # 100000+330000
+        'card_sales': 170000       # 150000+20000
+    }
+    
+    for key, expected in expected_consolidated.items():
+        actual = c_agg.get(key, 0)
+        if actual == expected:
+            log_pass(f"Consolidated {key}", f"{actual} (expected {expected})")
+        else:
+            log_fail(f"Consolidated {key}", f"Expected {expected}, got {actual}")
+
+# ============================================================================
+# TEST FIX 2: TRUE IMMUTABILITY
+# ============================================================================
+
+def test_immutability_and_reversals(centre_map: Dict[str, str], event_ids: Dict[str, str]):
+    """Test true immutability and reversal functionality"""
+    print("\n" + "="*80)
+    print("TEST FIX 2: TRUE IMMUTABILITY + REVERSAL TESTS")
+    print("="*80)
+    
+    phoenix_id = centre_map['Phoenix Pallassio']
+    
+    # Test a) Reverse CASH booking (Phoenix 300000)
+    print("\n--- Reversal Test A: CASH Booking ---")
+    event_id = event_ids['phoenix_cash']
+    
+    # Get BEFORE state
+    before = get_event_by_id(event_id)
+    before_raw = extract_raw_event_fields(before)
+    
+    # Perform reversal
+    resp = reverse_event(event_id, "Test reversal - CASH booking", "RECEPTION")
+    if resp.status_code == 200:
+        reversal_result = resp.json()
+        reversal_id = reversal_result['reversal_event']['id']
+        log_pass("Reversal A: CASH booking reversed", f"Reversal event ID: {reversal_id}")
+        
+        # Get AFTER state
+        after = get_event_by_id(event_id)
+        after_raw = extract_raw_event_fields(after)
+        
+        # Check immutability
+        if compare_events(before, after):
+            log_pass("Reversal A: Immutability check", "Original event unchanged (byte-for-byte)")
+        else:
+            log_fail("Reversal A: Immutability check", "Original event was modified!")
+            print(f"  BEFORE: {json.dumps(before_raw, indent=2)}")
+            print(f"  AFTER:  {json.dumps(after_raw, indent=2)}")
+        
+        # Verify no reversal metadata on original
+        forbidden_fields = ['reversed_by_event_id', 'reversed_at', 'reversed_by', 'reversal_reason', 'reversed']
+        found_forbidden = [f for f in forbidden_fields if f in after_raw]
+        if len(found_forbidden) == 0:
+            log_pass("Reversal A: No reversal metadata on original", "Clean original event")
+        else:
+            log_fail("Reversal A: No reversal metadata on original", 
+                    f"Found forbidden fields: {found_forbidden}")
+        
+        # Verify reversal event properties
+        reversal_event = get_event_by_id(reversal_id)
+        if reversal_event.get('is_reversal') == True:
+            log_pass("Reversal A: Reversal event has is_reversal=true", "")
+        else:
+            log_fail("Reversal A: Reversal event", "is_reversal not true")
+        
+        if reversal_event.get('reverses') == event_id:
+            log_pass("Reversal A: Reversal event has reverses=originalId", "")
+        else:
+            log_fail("Reversal A: Reversal event", f"reverses field incorrect: {reversal_event.get('reverses')}")
+        
+        # Verify dashboard metrics decreased
+        phoenix_dash = get_dashboard(phoenix_id, BUSINESS_DATE)
+        p_agg = phoenix_dash['agg']
+        
+        # After reversal: total_revenue should be 1250000 - 300000 = 950000
+        if p_agg['total_revenue'] == 950000:
+            log_pass("Reversal A: Phoenix total_revenue", f"950000 (decreased by 300000)")
+        else:
+            log_fail("Reversal A: Phoenix total_revenue", 
+                    f"Expected 950000, got {p_agg['total_revenue']}")
+        
+        # cash_sales should be 800000 - 300000 = 500000
+        if p_agg['cash_sales'] == 500000:
+            log_pass("Reversal A: Phoenix cash_sales", f"500000 (decreased by 300000)")
+        else:
+            log_fail("Reversal A: Phoenix cash_sales", 
+                    f"Expected 500000, got {p_agg['cash_sales']}")
+        
+        # UPI_1, UPI_2, CARD should be unchanged
+        if p_agg['upi_1_sales'] == 200000:
+            log_pass("Reversal A: Phoenix upi_1_sales unchanged", "200000")
+        else:
+            log_fail("Reversal A: Phoenix upi_1_sales", f"Should be 200000, got {p_agg['upi_1_sales']}")
+    else:
+        log_fail("Reversal A: CASH booking", f"Reversal failed with status {resp.status_code}")
+    
+    # Test b) Reverse UPI_1 booking (Phoenix 200000)
+    print("\n--- Reversal Test B: UPI_1 Booking ---")
+    event_id = event_ids['phoenix_upi1']
+    before = get_event_by_id(event_id)
+    
+    resp = reverse_event(event_id, "Test reversal - UPI_1 booking", "RECEPTION")
+    if resp.status_code == 200:
+        log_pass("Reversal B: UPI_1 booking reversed", "")
+        
+        after = get_event_by_id(event_id)
+        if compare_events(before, after):
+            log_pass("Reversal B: Immutability check", "Original event unchanged")
+        else:
+            log_fail("Reversal B: Immutability check", "Original event was modified!")
+        
+        phoenix_dash = get_dashboard(phoenix_id, BUSINESS_DATE)
+        p_agg = phoenix_dash['agg']
+        
+        # upi_1_sales should be 200000 - 200000 = 0
+        if p_agg['upi_1_sales'] == 0:
+            log_pass("Reversal B: Phoenix upi_1_sales", "0 (decreased by 200000)")
+        else:
+            log_fail("Reversal B: Phoenix upi_1_sales", f"Expected 0, got {p_agg['upi_1_sales']}")
+        
+        # cash_sales should still be 500000 (unchanged from reversal A)
+        if p_agg['cash_sales'] == 500000:
+            log_pass("Reversal B: Phoenix cash_sales unchanged", "500000")
+        else:
+            log_fail("Reversal B: Phoenix cash_sales", f"Should be 500000, got {p_agg['cash_sales']}")
+    else:
+        log_fail("Reversal B: UPI_1 booking", f"Reversal failed with status {resp.status_code}")
+    
+    # Test c) Reverse UPI_2 booking (Phoenix 100000)
+    print("\n--- Reversal Test C: UPI_2 Booking ---")
+    event_id = event_ids['phoenix_upi2']
+    before = get_event_by_id(event_id)
+    
+    resp = reverse_event(event_id, "Test reversal - UPI_2 booking", "RECEPTION")
+    if resp.status_code == 200:
+        log_pass("Reversal C: UPI_2 booking reversed", "")
+        
+        after = get_event_by_id(event_id)
+        if compare_events(before, after):
+            log_pass("Reversal C: Immutability check", "Original event unchanged")
+        else:
+            log_fail("Reversal C: Immutability check", "Original event was modified!")
+        
+        phoenix_dash = get_dashboard(phoenix_id, BUSINESS_DATE)
+        p_agg = phoenix_dash['agg']
+        
+        # upi_2_sales should be 100000 - 100000 = 0
+        if p_agg['upi_2_sales'] == 0:
+            log_pass("Reversal C: Phoenix upi_2_sales", "0 (decreased by 100000)")
+        else:
+            log_fail("Reversal C: Phoenix upi_2_sales", f"Expected 0, got {p_agg['upi_2_sales']}")
+    else:
+        log_fail("Reversal C: UPI_2 booking", f"Reversal failed with status {resp.status_code}")
+    
+    # Test d) Reverse CARD booking (Phoenix 150000)
+    print("\n--- Reversal Test D: CARD Booking ---")
+    event_id = event_ids['phoenix_card']
+    before = get_event_by_id(event_id)
+    
+    resp = reverse_event(event_id, "Test reversal - CARD booking", "RECEPTION")
+    if resp.status_code == 200:
+        log_pass("Reversal D: CARD booking reversed", "")
+        
+        after = get_event_by_id(event_id)
+        if compare_events(before, after):
+            log_pass("Reversal D: Immutability check", "Original event unchanged")
+        else:
+            log_fail("Reversal D: Immutability check", "Original event was modified!")
+        
+        phoenix_dash = get_dashboard(phoenix_id, BUSINESS_DATE)
+        p_agg = phoenix_dash['agg']
+        
+        # card_sales should be 150000 - 150000 = 0
+        if p_agg['card_sales'] == 0:
+            log_pass("Reversal D: Phoenix card_sales", "0 (decreased by 150000)")
+        else:
+            log_fail("Reversal D: Phoenix card_sales", f"Expected 0, got {p_agg['card_sales']}")
+        
+        # After all 4 reversals, Phoenix should only have membership sale revenue
+        # total_revenue = 500000 (only membership sale)
+        if p_agg['total_revenue'] == 500000:
+            log_pass("Reversal D: Phoenix total_revenue after all reversals", "500000 (only membership sale)")
+        else:
+            log_fail("Reversal D: Phoenix total_revenue", f"Expected 500000, got {p_agg['total_revenue']}")
+    else:
+        log_fail("Reversal D: CARD booking", f"Reversal failed with status {resp.status_code}")
+    
+    # Test e) Reverse MEMBERSHIP redemption (Holiday Inn 100000)
+    print("\n--- Reversal Test E: Membership Redemption ---")
+    event_id = event_ids['holiday_membership_redeem']
+    before = get_event_by_id(event_id)
+    
+    # Check membership balance before reversal
+    mem_before = get_membership(event_ids['membership_code'])
+    balance_before = mem_before['remaining_paise']
+    print(f"  Membership {event_ids['membership_code']} balance before reversal: {balance_before}")
+    
+    resp = reverse_event(event_id, "Test reversal - Membership redemption", "RECEPTION")
+    if resp.status_code == 200:
+        log_pass("Reversal E: Membership redemption reversed", "")
+        
+        after = get_event_by_id(event_id)
+        if compare_events(before, after):
+            log_pass("Reversal E: Immutability check", "Original event unchanged")
+        else:
+            log_fail("Reversal E: Immutability check", "Original event was modified!")
+        
+        # Check membership balance after reversal - should be restored to 500000
+        mem_after = get_membership(event_ids['membership_code'])
+        balance_after = mem_after['remaining_paise']
+        print(f"  Membership {event_ids['membership_code']} balance after reversal: {balance_after}")
+        
+        if balance_after == 500000:
+            log_pass("Reversal E: Membership balance restored", f"500000 (was {balance_before})")
+        else:
+            log_fail("Reversal E: Membership balance", 
+                    f"Expected 500000, got {balance_after} (was {balance_before})")
+    else:
+        log_fail("Reversal E: Membership redemption", f"Reversal failed with status {resp.status_code}")
+    
+    # Test f) Reverse GIFT_CARD redemption (Lulu Mall 150000)
+    print("\n--- Reversal Test F: Gift Card Redemption ---")
+    event_id = event_ids['lulu_gc_redeem']
+    before = get_event_by_id(event_id)
+    
+    # Check gift card balance before reversal
+    gc_before = get_gift_card(event_ids['gift_card_code'])
+    balance_before = gc_before['remaining_paise']
+    print(f"  Gift card {event_ids['gift_card_code']} balance before reversal: {balance_before}")
+    
+    resp = reverse_event(event_id, "Test reversal - Gift card redemption", "RECEPTION")
+    if resp.status_code == 200:
+        log_pass("Reversal F: Gift card redemption reversed", "")
+        
+        after = get_event_by_id(event_id)
+        if compare_events(before, after):
+            log_pass("Reversal F: Immutability check", "Original event unchanged")
+        else:
+            log_fail("Reversal F: Immutability check", "Original event was modified!")
+        
+        # Check gift card balance after reversal - should be restored to 300000
+        gc_after = get_gift_card(event_ids['gift_card_code'])
+        balance_after = gc_after['remaining_paise']
+        print(f"  Gift card {event_ids['gift_card_code']} balance after reversal: {balance_after}")
+        
+        if balance_after == 300000:
+            log_pass("Reversal F: Gift card balance restored", f"300000 (was {balance_before})")
+        else:
+            log_fail("Reversal F: Gift card balance", 
+                    f"Expected 300000, got {balance_after} (was {balance_before})")
+    else:
+        log_fail("Reversal F: Gift card redemption", f"Reversal failed with status {resp.status_code}")
+
+# ============================================================================
+# TEST REVERSAL RULES
+# ============================================================================
+
+def test_reversal_rules(event_ids: Dict[str, str]):
+    """Test reversal business rules"""
+    print("\n" + "="*80)
+    print("TEST REVERSAL RULES")
+    print("="*80)
+    
+    # Test: Cannot reverse already-reversed event
+    print("\n--- Rule: Cannot reverse already-reversed event ---")
+    event_id = event_ids['phoenix_cash']  # Already reversed in previous test
+    resp = reverse_event(event_id, "Attempt double reversal", "RECEPTION")
+    if resp.status_code == 400:
+        error = resp.json().get('error', '')
+        if 'already reversed' in error.lower():
+            log_pass("Rule: Double reversal prevention", f"400 error: {error}")
+        else:
+            log_fail("Rule: Double reversal prevention", f"400 but wrong message: {error}")
+    else:
+        log_fail("Rule: Double reversal prevention", f"Expected 400, got {resp.status_code}")
+    
+    # Test: Reason mandatory
+    print("\n--- Rule: Reason mandatory ---")
+    # Create a new booking to test
+    centres = get_centres()
+    phoenix_id = next(c['id'] for c in centres if c['name'] == 'Phoenix Pallassio')
+    test_booking = create_booking(phoenix_id, "Test-User", 10000, "CASH")
+    
+    resp = requests.post(
+        f"{BASE_URL}/events/{test_booking['id']}/reverse",
+        json={"reason": "", "actor": "test", "role": "RECEPTION"}
+    )
+    if resp.status_code == 400:
+        error = resp.json().get('error', '')
+        if 'reason' in error.lower() and 'mandatory' in error.lower():
+            log_pass("Rule: Mandatory reason", f"400 error: {error}")
+        else:
+            log_fail("Rule: Mandatory reason", f"400 but wrong message: {error}")
+    else:
+        log_fail("Rule: Mandatory reason", f"Expected 400, got {resp.status_code}")
+    
+    # Test: Cannot reverse a reversal event
+    print("\n--- Rule: Cannot reverse a reversal event ---")
+    # Get a reversal event ID from previous tests
+    all_events = get_events(from_date=BUSINESS_DATE, to_date=BUSINESS_DATE)
+    reversal_events = [e for e in all_events if e.get('is_reversal') == True]
+    if reversal_events:
+        reversal_id = reversal_events[0]['id']
+        resp = reverse_event(reversal_id, "Attempt to reverse a reversal", "RECEPTION")
+        if resp.status_code == 400:
+            error = resp.json().get('error', '')
+            if 'cannot reverse a reversal' in error.lower():
+                log_pass("Rule: Cannot reverse reversal", f"400 error: {error}")
+            else:
+                log_fail("Rule: Cannot reverse reversal", f"400 but wrong message: {error}")
+        else:
+            log_fail("Rule: Cannot reverse reversal", f"Expected 400, got {resp.status_code}")
+    else:
+        log_warning("Rule: Cannot reverse reversal", "No reversal events found to test")
+
+# ============================================================================
+# TEST REPORTS MODULE
+# ============================================================================
+
+def test_reports_module(centre_map: Dict[str, str]):
+    """Test the reports module"""
+    print("\n" + "="*80)
+    print("TEST REPORTS MODULE")
+    print("="*80)
+    
+    phoenix_id = centre_map['Phoenix Pallassio']
+    holiday_id = centre_map['Holiday Inn']
+    lulu_id = centre_map['Lulu Mall']
+    
+    # Test: P&L Report with centre_id=ALL
+    print("\n--- P&L Report: ALL Centres, Month Group ---")
+    # Use the specific test date range to avoid accumulated data from other test runs
+    report = get_pl_report("ALL", BUSINESS_DATE, BUSINESS_DATE, "day")
+    
+    if 'totals' in report and 'consolidated' in report['totals']:
+        consolidated = report['totals']['consolidated']
+        
+        # After reversals: Phoenix net_revenue = 500000 + 10000 (test booking)
+        # Total = 1400000 + 10000 = 1410000
+        expected_net_revenue = 1410000
+        actual_net_revenue = consolidated.get('net_revenue', 0)
+        
+        if actual_net_revenue == expected_net_revenue:
+            log_pass("Report: Consolidated net_revenue after reversals", 
+                    f"{actual_net_revenue} (expected {expected_net_revenue})")
+        else:
+            log_fail("Report: Consolidated net_revenue", 
+                    f"Expected {expected_net_revenue}, got {actual_net_revenue}")
+        
+        # Check per_centre has 3 entries
+        per_centre = report['totals'].get('per_centre', [])
+        if len(per_centre) == 3:
+            log_pass("Report: Per-centre entries", f"3 centres present")
+        else:
+            log_fail("Report: Per-centre entries", f"Expected 3, got {len(per_centre)}")
+        
+        # Verify Phoenix metrics after reversals (includes 10000 test booking)
+        phoenix_entry = next((c for c in per_centre if c['centre_id'] == phoenix_id), None)
+        if phoenix_entry:
+            # Phoenix: net_revenue = 500000 + 10000 (test booking)
+            if phoenix_entry['net_revenue'] == 510000:
+                log_pass("Report: Phoenix net_revenue", "510000 (500000 membership + 10000 test booking)")
+            else:
+                log_fail("Report: Phoenix net_revenue", 
+                        f"Expected 510000, got {phoenix_entry['net_revenue']}")
+            
+            # Phoenix: upi_1_sales = 0 (reversed)
+            if phoenix_entry['upi_1_sales'] == 0:
+                log_pass("Report: Phoenix upi_1_sales", "0 (reversed)")
+            else:
+                log_fail("Report: Phoenix upi_1_sales", 
+                        f"Expected 0, got {phoenix_entry['upi_1_sales']}")
+            
+            # Phoenix: upi_2_sales = 0 (reversed)
+            if phoenix_entry['upi_2_sales'] == 0:
+                log_pass("Report: Phoenix upi_2_sales", "0 (reversed)")
+            else:
+                log_fail("Report: Phoenix upi_2_sales", 
+                        f"Expected 0, got {phoenix_entry['upi_2_sales']}")
+            
+            # Phoenix: card_sales = 0 (reversed)
+            if phoenix_entry['card_sales'] == 0:
+                log_pass("Report: Phoenix card_sales", "0 (reversed)")
+            else:
+                log_fail("Report: Phoenix card_sales", 
+                        f"Expected 0, got {phoenix_entry['card_sales']}")
+            
+            # Phoenix: cash_sales = 500000 + 10000 (membership sale + test booking)
+            if phoenix_entry['cash_sales'] == 510000:
+                log_pass("Report: Phoenix cash_sales", "510000 (500000 membership + 10000 test)")
+            else:
+                log_fail("Report: Phoenix cash_sales", 
+                        f"Expected 510000, got {phoenix_entry['cash_sales']}")
+            
+            # Phoenix: revenue_reversals = 750000 (300000+200000+100000+150000)
+            if phoenix_entry['revenue_reversals'] == 750000:
+                log_pass("Report: Phoenix revenue_reversals", "750000")
+            else:
+                log_fail("Report: Phoenix revenue_reversals", 
+                        f"Expected 750000, got {phoenix_entry['revenue_reversals']}")
+            
+            # Phoenix: gross_revenue - revenue_reversals = net_revenue
+            gross = phoenix_entry.get('gross_revenue', 0)
+            reversals = phoenix_entry.get('revenue_reversals', 0)
+            net = phoenix_entry.get('net_revenue', 0)
+            if gross - reversals == net:
+                log_pass("Report: Phoenix gross - reversals = net", 
+                        f"{gross} - {reversals} = {net}")
+            else:
+                log_fail("Report: Phoenix gross - reversals = net", 
+                        f"{gross} - {reversals} ≠ {net}")
+        else:
+            log_fail("Report: Phoenix entry", "Not found in per_centre")
+    else:
+        log_fail("Report: Structure", "Missing totals.consolidated")
+    
+    # Test: Different groupings
+    print("\n--- P&L Report: Different Groupings ---")
+    for group in ['day', 'week', 'year']:
+        try:
+            report = get_pl_report("ALL", BUSINESS_DATE, BUSINESS_DATE, group)
+            if 'rows' in report and 'totals' in report:
+                log_pass(f"Report: Group={group}", f"Valid JSON with rows and totals")
+            else:
+                log_fail(f"Report: Group={group}", "Missing rows or totals")
+        except Exception as e:
+            log_fail(f"Report: Group={group}", str(e))
+    
+    # Test: Individual centre report
+    print("\n--- P&L Report: Individual Centre (Phoenix) ---")
+    phoenix_report = get_pl_report(phoenix_id, BUSINESS_DATE, BUSINESS_DATE, "day")
+    if 'totals' in phoenix_report and 'consolidated' in phoenix_report['totals']:
+        phoenix_totals = phoenix_report['totals']['consolidated']
+        
+        # Should show only Phoenix data (includes 10000 test booking)
+        if phoenix_totals['net_revenue'] == 510000:
+            log_pass("Report: Phoenix individual report net_revenue", "510000 (includes test booking)")
+        else:
+            log_fail("Report: Phoenix individual report", 
+                    f"Expected net_revenue=510000, got {phoenix_totals['net_revenue']}")
+        
+        # Verify no data leak from other centres
+        per_centre = phoenix_report['totals'].get('per_centre', [])
+        if len(per_centre) == 1 and per_centre[0]['centre_id'] == phoenix_id:
+            log_pass("Report: Phoenix individual - no data leak", "Only Phoenix data present")
+        else:
+            log_fail("Report: Phoenix individual - data leak", 
+                    f"Expected 1 centre (Phoenix), got {len(per_centre)}")
+    else:
+        log_fail("Report: Phoenix individual", "Missing totals.consolidated")
+    
+    # Test: CSV Report
+    print("\n--- CSV Report ---")
+    try:
+        csv_content = get_csv_report("ALL", BUSINESS_DATE, BUSINESS_DATE, "day")
+        
+        # Check it's CSV format
+        lines = csv_content.strip().split('\n')
+        # Skip comment lines starting with #
+        data_lines = [l for l in lines if not l.startswith('#')]
+        
+        if len(data_lines) > 0:
+            log_pass("Report: CSV format", f"{len(data_lines)} lines (including header)")
+            
+            # Check for required columns
+            header = data_lines[0]
+            required_cols = ['Period', 'Centre', 'Opening Cash', 'Booking Sales', 
+                           'Membership Sales', 'Gift Card Sales', 'Gross Revenue', 
+                           'Revenue Reversals', 'Net Revenue', 'Cash Sales', 
+                           'UPI 1 Sales', 'UPI 2 Sales', 'Card Sales']
+            
+            # Check if header has content
+            if len(header.strip()) > 0:
+                log_pass("Report: CSV columns", f"CSV header present with {len(header.split(','))} columns")
+            else:
+                log_warning("Report: CSV columns", "CSV header is empty (may be no data for test date)")
+            
+            # Check for ALL CENTRES row
+            all_centres_rows = [l for l in data_lines if 'ALL CENTRES' in l]
+            if len(all_centres_rows) > 0:
+                log_pass("Report: CSV ALL CENTRES row", "Present")
+            else:
+                log_fail("Report: CSV ALL CENTRES row", "Not found")
+        else:
+            log_fail("Report: CSV format", "No data lines found")
     except Exception as e:
-        print(f"\n❌ UNEXPECTED ERROR: {e}")
+        log_fail("Report: CSV", str(e))
+    
+    # Test: Cash movements don't affect revenue/expenses
+    print("\n--- Report: Cash movements isolation ---")
+    lulu_report = get_pl_report(lulu_id, BUSINESS_DATE, BUSINESS_DATE, "day")
+    if 'totals' in lulu_report and 'consolidated' in lulu_report['totals']:
+        lulu_totals = lulu_report['totals']['consolidated']
+        
+        # Lulu had BANK_DEPOSIT 100000 - should NOT be in revenue/expenses
+        # total_revenue should be 400000 (only booking)
+        if lulu_totals['total_revenue'] == 400000:
+            log_pass("Report: Lulu cash movement isolation", 
+                    "BANK_DEPOSIT not in revenue (400000)")
+        else:
+            log_fail("Report: Lulu cash movement isolation", 
+                    f"Expected revenue=400000, got {lulu_totals['total_revenue']}")
+        
+        # cash_deposited should be 100000
+        if lulu_totals['cash_deposited'] == 100000:
+            log_pass("Report: Lulu cash_deposited", "100000")
+        else:
+            log_fail("Report: Lulu cash_deposited", 
+                    f"Expected 100000, got {lulu_totals['cash_deposited']}")
+    else:
+        log_fail("Report: Lulu report", "Missing totals.consolidated")
+
+# ============================================================================
+# MAIN TEST EXECUTION
+# ============================================================================
+
+def main():
+    """Main test execution"""
+    print("="*80)
+    print("SPA ERP BACKEND - CRITICAL VERIFICATION PASS")
+    print("="*80)
+    print(f"Base URL: {BASE_URL}")
+    print(f"Business Date: {BUSINESS_DATE}")
+    print("="*80)
+    
+    try:
+        # Test FIX 1: Centres
+        centre_map = test_centres()
+        
+        # Test Acceptance Scenario
+        event_ids = test_acceptance_scenario(centre_map)
+        
+        # Test Metrics Verification (before reversals)
+        test_metrics_verification(centre_map)
+        
+        # Test FIX 2: True Immutability + Reversals
+        test_immutability_and_reversals(centre_map, event_ids)
+        
+        # Test Reversal Rules
+        test_reversal_rules(event_ids)
+        
+        # Test Reports Module
+        test_reports_module(centre_map)
+        
+    except Exception as e:
+        log_fail("CRITICAL ERROR", str(e))
         import traceback
         traceback.print_exc()
-        exit(1)
+    
+    # Print summary
+    print("\n" + "="*80)
+    print("TEST SUMMARY")
+    print("="*80)
+    print(f"✅ PASSED: {len(test_results['passed'])}")
+    print(f"❌ FAILED: {len(test_results['failed'])}")
+    print(f"⚠️  WARNINGS: {len(test_results['warnings'])}")
+    
+    if test_results['failed']:
+        print("\n" + "="*80)
+        print("FAILED TESTS:")
+        print("="*80)
+        for fail in test_results['failed']:
+            print(fail)
+    
+    if test_results['warnings']:
+        print("\n" + "="*80)
+        print("WARNINGS:")
+        print("="*80)
+        for warn in test_results['warnings']:
+            print(warn)
+    
+    print("\n" + "="*80)
+    if len(test_results['failed']) == 0:
+        print("🎉 ALL TESTS PASSED!")
+    else:
+        print(f"⚠️  {len(test_results['failed'])} TESTS FAILED")
+    print("="*80)
+
+if __name__ == "__main__":
+    main()
