@@ -14,7 +14,7 @@ import { toast, Toaster } from 'sonner'
 import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
-  Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText
+  Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key
 } from 'lucide-react'
 
 // ---------- utils ----------
@@ -29,8 +29,26 @@ const todayStr = () => {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
   return `${parts.find(p=>p.type==='year').value}-${parts.find(p=>p.type==='month').value}-${parts.find(p=>p.type==='day').value}`
 }
-const apiGet = async (path) => { const r = await fetch('/api'+path); return r.json() }
-const apiPost = async (path, body) => { const r = await fetch('/api'+path, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); return r.json() }
+
+let authToken = typeof window !== 'undefined' ? localStorage.getItem('sb_auth_token') || '' : ''
+function setAuthToken(t) {
+  authToken = t
+  if (typeof window !== 'undefined') {
+    if (t) localStorage.setItem('sb_auth_token', t)
+    else localStorage.removeItem('sb_auth_token')
+  }
+}
+
+const apiGet = async (path) => {
+  const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  const r = await fetch('/api'+path, { headers })
+  return r.json()
+}
+const apiPost = async (path, body) => {
+  const headers = { 'Content-Type':'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
+  const r = await fetch('/api'+path, { method:'POST', headers, body: JSON.stringify(body) })
+  return r.json()
+}
 
 const ROLES = [
   { id: 'RECEPTION', label: 'Reception' },
@@ -1048,7 +1066,7 @@ function AuditView({ onDrill, refreshTick }) {
 // ============================================================================
 // REPORTS (P&L + Cash Report + CSV export)
 // ============================================================================
-function ReportsView({ centre, centres, onDrill, refreshTick }) {
+function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
   const [group, setGroup] = useState('month')
   const [from, setFrom] = useState(() => { const d=new Date(); d.setMonth(d.getMonth()-2); d.setDate(1); return d.toISOString().slice(0,10) })
   const [to, setTo] = useState(todayStr())
@@ -1102,7 +1120,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick }) {
             <SelectTrigger className="w-[180px]"><SelectValue/></SelectTrigger>
             <SelectContent>
               <SelectItem value="CURRENT">{centre.name} only</SelectItem>
-              <SelectItem value="ALL">All Centres (consolidated)</SelectItem>
+              {role === 'SUPER' && <SelectItem value="ALL">All Centres (consolidated)</SelectItem>}
             </SelectContent>
           </Select>
           <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
@@ -1308,25 +1326,254 @@ function ReportsView({ centre, centres, onDrill, refreshTick }) {
 }
 
 // ============================================================================
+// LOGIN SCREEN & USER MANAGEMENT VIEW
+// ============================================================================
+function LoginScreen({ onLogin }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setLoading(true); setError(null)
+    const res = await apiPost('/auth/login', { email, password })
+    setLoading(false)
+    if (res.error) {
+      setError(res.error)
+      toast.error('Login failed: ' + res.error)
+    } else {
+      toast.success('Welcome back, ' + (res.profile?.full_name || email))
+      onLogin(res)
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-background via-card to-muted/30 flex items-center justify-center p-4">
+      <Card className="w-full max-w-md border-border/60 shadow-2xl bg-card/80 backdrop-blur-md">
+        <CardHeader className="space-y-3 text-center pb-6 border-b border-border/40">
+          <div className="mx-auto h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 via-amber-500 to-rose-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
+            <Sparkles className="h-8 w-8 text-white" />
+          </div>
+          <div>
+            <CardTitle className="text-2xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-rose-400 bg-clip-text text-transparent">
+              Auréa Spa ERP
+            </CardTitle>
+            <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">
+              Multi-Centre Single Source of Truth
+            </p>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email Address</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="admin@aurea.spa or phoenix@aurea.spa"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="bg-background/60 border-border/60 focus:border-amber-500 h-11"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="••••••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="bg-background/60 border-border/60 focus:border-amber-500 h-11"
+              />
+            </div>
+            <Button type="submit" disabled={loading} className="w-full h-11 font-semibold bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white shadow-lg shadow-amber-500/20 mt-2">
+              {loading ? 'Authenticating...' : 'Sign In to Business OS'}
+            </Button>
+          </form>
+          <div className="mt-6 text-center text-[11px] text-muted-foreground border-t border-border/40 pt-4">
+            Database-level RLS &amp; strict centre isolation enforced
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function UsersView({ centres, bump, refreshTick }) {
+  const [users, setUsers] = useState([])
+  const [f, setF] = useState({ email: '', password: '', full_name: '', role: 'CENTRE_USER', centre_id: '' })
+  const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    apiGet('/users').then(data => { if (Array.isArray(data)) setUsers(data) })
+  }, [refreshTick])
+
+  const create = async () => {
+    if (!f.email || !f.full_name) { toast.error('Email and Full Name required'); return }
+    if (f.role === 'CENTRE_USER' && !f.centre_id) { toast.error('Centre selection required for Centre Users'); return }
+    const r = await apiPost('/users', f)
+    if (r.error) { toast.error(r.error); return }
+    toast.success('User created successfully')
+    setOpen(false)
+    setF({ email: '', password: '', full_name: '', role: 'CENTRE_USER', centre_id: '' })
+    bump()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-semibold">User &amp; RBAC Management</h2>
+          <p className="text-sm text-muted-foreground">Manage Supabase Auth profiles, Super Admin assignments, and Centre User isolation.</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button className="bg-primary hover:bg-primary/90 text-primary-foreground"><Plus className="h-4 w-4 mr-2" />Add New User</Button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader><DialogTitle>Create Auth User &amp; Profile</DialogTitle><DialogDescription>Provision credentials and set access scope.</DialogDescription></DialogHeader>
+            <div className="space-y-4 py-2">
+              <div><Label>Email</Label><Input type="email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} placeholder="user@aurea.spa"/></div>
+              <div><Label>Full Name</Label><Input value={f.full_name} onChange={e=>setF({...f, full_name:e.target.value})} placeholder="Manager Name"/></div>
+              <div><Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} placeholder="Default: DefaultPass123!"/></div>
+              <div>
+                <Label>Role Assignment</Label>
+                <Select value={f.role} onValueChange={v => setF({...f, role:v, centre_id: v === 'SUPER_ADMIN' ? '' : f.centre_id})}>
+                  <SelectTrigger><SelectValue/></SelectTrigger>
+                  <SelectContent><SelectItem value="CENTRE_USER">Centre User (Scoped)</SelectItem><SelectItem value="SUPER_ADMIN">Super Admin (All Access)</SelectItem></SelectContent>
+                </Select>
+              </div>
+              {f.role === 'CENTRE_USER' && (
+                <div>
+                  <Label>Assigned Centre</Label>
+                  <Select value={f.centre_id} onValueChange={v => setF({...f, centre_id:v})}>
+                    <SelectTrigger><SelectValue placeholder="Select Centre..."/></SelectTrigger>
+                    <SelectContent>{centres.map(c=><SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+            <DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button><Button onClick={create}>Provision User</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <Card className="border-border/50 shadow-sm">
+        <CardHeader><CardTitle className="text-base font-medium">Active Profiles &amp; Access Controls</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow><TableHead>User / Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead>Assigned Scope</TableHead><TableHead>Status</TableHead><TableHead>Created</TableHead></TableRow>
+            </TableHeader>
+            <TableBody>
+              {users.map(u => {
+                const cName = u.centre_id ? centres.find(x=>x.id===u.centre_id)?.name || u.centre_id : 'All Centres (Global)'
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">{u.full_name || 'Unnamed'}</TableCell>
+                    <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                    <TableCell><Badge variant={u.role==='SUPER_ADMIN'?'default':'secondary'}>{u.role}</Badge></TableCell>
+                    <TableCell className="text-sm">{cName}</TableCell>
+                    <TableCell><Badge className="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20">Active</Badge></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{new Date(u.created_at || Date.now()).toLocaleDateString()}</TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+// ============================================================================
 // SHELL
 // ============================================================================
 function App() {
+  const [user, setUser] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [authLoading, setAuthLoading] = useState(true)
   const [centres, setCentres] = useState([])
   const [centre, setCentre] = useState(null)
-  const [role, setRole] = useState('RECEPTION')
   const [view, setView] = useState('dashboard')
   const [bump, setBump] = useState(0)
   const [drillCtx, setDrillCtx] = useState(null)
 
-  useEffect(() => { apiGet('/centres').then(list => { setCentres(list); setCentre(list[0]) }) }, [])
+  const loadAuth = useCallback(async () => {
+    setAuthLoading(true)
+    const res = await apiGet('/auth/me')
+    if (res.ok && res.user && res.profile) {
+      setUser(res.user)
+      setProfile(res.profile)
+      const list = await apiGet('/centres')
+      if (Array.isArray(list)) {
+        if (res.profile.role === 'CENTRE_USER' && res.profile.centre_id) {
+          const scoped = list.filter(c => c.id === res.profile.centre_id)
+          setCentres(scoped.length > 0 ? scoped : list)
+          setCentre(scoped[0] || list[0] || null)
+        } else {
+          setCentres(list)
+          setCentre(list[0] || null)
+        }
+      }
+    } else {
+      setUser(null)
+      setProfile(null)
+      setAuthToken('')
+    }
+    setAuthLoading(false)
+  }, [])
+
+  useEffect(() => { loadAuth() }, [loadAuth])
+
   DrillContext.open = (ctx) => setDrillCtx(ctx)
   DrillContext.close = () => setDrillCtx(null)
   const onDrill = (ctx) => setDrillCtx(ctx)
 
-  if (!centre) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading centres…</div>
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-card to-muted/20 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+        <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center animate-pulse">
+          <Sparkles className="h-7 w-7 text-white animate-spin" />
+        </div>
+        <div className="text-sm font-medium tracking-wide">Securing connection to Supabase engine...</div>
+      </div>
+    )
+  }
 
-  const Icon = NAV.find(n=>n.id===view)?.icon || LayoutDashboard
+  if (!user || !profile) {
+    return <LoginScreen onLogin={(res) => { setAuthToken(res.token); setUser(res.user); setProfile(res.profile); loadAuth() }} />
+  }
+
+  if (!centre) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading approved centres…</div>
+
+  const role = profile.role === 'SUPER_ADMIN' ? 'SUPER' : 'MANAGER'
+  const navItems = [
+    ...NAV,
+    ...(profile.role === 'SUPER_ADMIN' ? [{ id: 'users', label: 'User Management', icon: Users }] : [])
+  ]
+
+  const Icon = navItems.find(n=>n.id===view)?.icon || LayoutDashboard
   const props = { centre, centres, role, bump: () => setBump(b=>b+1), refreshTick: bump, onDrill }
+
+  const handleLogout = async () => {
+    await apiPost('/auth/logout', {})
+    setAuthToken('')
+    setUser(null)
+    setProfile(null)
+    toast.info('Logged out from Auréa Spa Business OS')
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted/20">
@@ -1334,7 +1581,7 @@ function App() {
       <div className="flex">
         <aside className="w-64 h-screen sticky top-0 border-r border-border/50 bg-card/40 backdrop-blur p-4 flex flex-col">
           <div className="flex items-center gap-2 px-2 py-3">
-            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center">
+            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center shadow-md shadow-amber-500/20">
               <Sparkles className="h-5 w-5 text-white"/>
             </div>
             <div>
@@ -1342,29 +1589,47 @@ function App() {
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Business OS</div>
             </div>
           </div>
+
+          {/* User badge block */}
+          <div className="mt-4 p-2.5 rounded-lg bg-muted/30 border border-border/50 flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold truncate text-foreground">{profile.full_name || profile.email}</div>
+              <Badge className="mt-1 text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
+                {profile.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'CENTRE USER'}
+              </Badge>
+            </div>
+            <Button variant="ghost" size="icon" title="Logout" onClick={handleLogout} className="h-8 w-8 hover:bg-rose-500/20 hover:text-rose-400">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Centre Scope Section */}
           <div className="mt-4 space-y-1">
-            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Centre</Label>
-            <Select value={centre.id} onValueChange={v=>setCentre(centres.find(c=>c.id===v))}>
-              <SelectTrigger><SelectValue/></SelectTrigger>
-              <SelectContent>{centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="h-3 w-3 inline mr-1"/>{c.name}</SelectItem>)}</SelectContent>
-            </Select>
+            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Centre Scope</Label>
+            {profile.role === 'SUPER_ADMIN' ? (
+              <Select value={centre.id} onValueChange={v=>setCentre(centres.find(c=>c.id===v))}>
+                <SelectTrigger className="bg-background/60"><SelectValue/></SelectTrigger>
+                <SelectContent>
+                  {centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="h-3 w-3 inline mr-1 text-amber-400"/>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-sm font-medium text-amber-200">
+                <Building2 className="h-4 w-4 text-amber-400 shrink-0"/>
+                <span className="truncate">{centre.name}</span>
+              </div>
+            )}
           </div>
-          <div className="mt-3 space-y-1">
-            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Role</Label>
-            <Select value={role} onValueChange={setRole}>
-              <SelectTrigger><SelectValue/></SelectTrigger>
-              <SelectContent>{ROLES.map(r=><SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <nav className="mt-6 flex-1 space-y-1">
-            {NAV.map(n => {
+
+          <nav className="mt-6 flex-1 space-y-1 overflow-y-auto pr-1">
+            {navItems.map(n => {
               const active = view === n.id
               const N = n.icon
               return (
                 <button key={n.id} onClick={()=>setView(n.id)}
-                  className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${active?'bg-primary text-primary-foreground':'hover:bg-muted text-foreground/80'}`}>
-                  <N className="h-4 w-4"/>{n.label}
-                  {active && <ChevronRight className="h-3 w-3 ml-auto"/>}
+                  className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${active?'bg-primary text-primary-foreground shadow-md shadow-primary/20':'hover:bg-muted text-foreground/80'}`}>
+                  <N className="h-4 w-4 shrink-0"/><span>{n.label}</span>
+                  {active && <ChevronRight className="h-3 w-3 ml-auto shrink-0"/>}
                 </button>
               )
             })}
@@ -1372,11 +1637,15 @@ function App() {
           <div className="text-[10px] text-muted-foreground px-2 py-3 border-t border-border/50">One transaction • One source • Infinite reports</div>
         </aside>
 
-        <main className="flex-1 p-8 max-w-[1600px]">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
-            <Icon className="h-4 w-4"/> <span>{NAV.find(n=>n.id===view)?.label}</span>
-            <span className="mx-1">/</span><span>{centre.name}</span>
-            <span className="ml-auto text-xs">{new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}</span>
+        <main className="flex-1 p-8 max-w-[1600px] overflow-y-auto">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6 pb-3 border-b border-border/40">
+            <Icon className="h-4 w-4 text-amber-400"/>
+            <span className="font-semibold text-foreground">{navItems.find(n=>n.id===view)?.label}</span>
+            <span className="mx-1.5 text-border">/</span>
+            <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5"/>{centre.name}</span>
+            <span className="ml-auto text-xs font-mono bg-muted/40 px-2 py-1 rounded text-muted-foreground border border-border/30">
+              {new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}
+            </span>
           </div>
 
           {view==='dashboard'  && <DashboardView {...props} />}
@@ -1390,6 +1659,7 @@ function App() {
           {view==='close'      && <CloseView {...props} />}
           {view==='reports'    && <ReportsView {...props} />}
           {view==='audit'      && <AuditView {...props} />}
+          {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
         </main>
       </div>
 
@@ -1399,3 +1669,4 @@ function App() {
 }
 
 export default App
+

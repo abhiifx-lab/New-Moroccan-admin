@@ -1,6 +1,7 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
+import { handleSupabaseRoute } from '@/lib/supabase-api'
 import {
   aggregate, drillDown, businessDate, periodLabel,
   EVENT_TYPES, CASH_MOVEMENT_TYPES, METRICS, APPROVED_CENTRES,
@@ -199,6 +200,9 @@ function toCsv(rows, columns) {
 }
 
 async function handle(request, { params }) {
+  if (process.env.USE_SUPABASE !== 'false') {
+    return handleSupabaseRoute(request, { params })
+  }
   const { path = [] } = await params
   const route = '/' + path.join('/')
   const method = request.method
