@@ -285,6 +285,51 @@ backend:
         agent: "testing"
         comment: "✅ VERIFIED: Audit log working correctly. GET /api/audit-log returns entries. Verified presence of CLOSE_DAY and REOPEN_DAY actions. Audit trail properly maintained for critical business day operations."
 
+  - task: "Enriched event detail endpoint (GET /events/:id)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /events/:id returns enriched event with centre object, ledger_impact {revenue, expense, cash, upi, card, liability_delta}, audit_history[], linked membership/gift_card, reversal_event/original_event links."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Enriched event detail working perfectly. Tested CASH booking (revenue=350000, cash=350000), MIXED booking (cash=100000, upi=200000, card=50000, revenue=350000), MEMBERSHIP_SALE (liability_delta=1000000, remaining=800000 after redemption), MEMBERSHIP redemption (revenue=0, liability_delta=-200000). All ledger_impact calculations correct. Centre object included. Audit history present with CREATE_EVENT entries. Linked membership/gift_card objects properly attached."
+
+  - task: "Drill-down endpoint for all metrics (GET /drill-down)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "GET /drill-down?metric=<key>&centre_id=&date= (or from&to) returns {label, total, isCount, breakdown_by_type, events:[{event, contribution}]}. Supports 17+ metrics including total_revenue, booking_sales, membership_sales, gift_card_sales, cash_sales, upi_sales, card_sales, total_expenses, cash_expenses, cash_deposited, float_added, bookings, redemptions, memberships_sold, gift_cards_sold, guests, net_profit."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Drill-down endpoint working perfectly for ALL 17 metrics tested. Each metric returns correct total matching dashboard aggregate. Events contributions sum exactly to total. Breakdown by event type accurate. Tested: total_revenue, booking_sales, membership_sales, gift_card_sales, cash_sales, upi_sales, card_sales, total_expenses, cash_expenses, cash_deposited, float_added, bookings, redemptions, memberships_sold, gift_cards_sold, guests, net_profit. All calculations 100% accurate."
+
+  - task: "Immutable event reversal (POST /events/:id/reverse)"
+    implemented: true
+    working: true
+    file: "app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "POST /events/:id/reverse creates NEW immutable reversal event with is_reversal=true, reverses=<originalId>. Original never edited (only metadata pointer reversed_by_event_id added). REASON MANDATORY (400 if empty). Cannot reverse already-reversed event (400). Cannot reverse a reversal event (400). MEMBERSHIP_SALE reversal marks membership reversed=true, active=false, remaining_paise=0. GIFT_CARD_SALE reversal same. BOOKING with MEMBERSHIP/GIFT_CARD redemption reversal RESTORES liability balance. Financial engine aggregate() applies sign=-1 to is_reversal events. Audit log records REVERSE_EVENT. If business day CLOSED, 403 for RECEPTION role, 200 for MANAGER/OPS/SUPER."
+      - working: true
+        agent: "testing"
+        comment: "✅ VERIFIED: Immutable reversal system working PERFECTLY. All semantic rules validated: (E) CASH booking reversal: dashboard metrics decreased correctly (total_revenue -350000, booking_sales -350000, cash_sales -350000, closing_cash -350000, bookings -1). Drill-down shows both original (+350000) and reversal (-350000) events. Reversal without reason rejected (400). Double reversal rejected (400). Reversal of reversal rejected (400). Audit log contains REVERSE_EVENT with reason and reversal_event_id. Original event has reversed_by_event_id and reversal_event link. (F) MEMBERSHIP_SALE reversal: membership marked reversed=true, active=false, remaining_paise=0. Further redemption attempts rejected (400 'Membership was reversed'). Dashboard membership_sales=0, cash_sales decreased by 1000000. (G) GIFT_CARD redemption reversal: gift card balance RESTORED from 350000 to 500000. Redemption_count decremented to 0. Dashboard redemptions decreased by 1. (H) Business day closed + role gate: RECEPTION role reversal rejected (403 'Manager approval required'). MANAGER role reversal succeeded (200). Dashboard UPI sales decreased correctly. (I) Cash-book: last running balance matches closing_cash_expected. Reversal lines present with is_reversal=true. ALL TESTS PASSED - module is production-ready."
+
 frontend:
   - task: "Full ERP UI"
     implemented: true
@@ -305,19 +350,17 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Financial engine correctness (aggregate)"
-    - "Dashboard aggregation endpoint"
-    - "Master Register (daily rows)"
-    - "Cash Book (running-balance ledger)"
-    - "Business Day open/close/reopen"
-    - "Booking event with all payment methods (CASH/UPI/CARD/MIXED/MEMBERSHIP/GIFT_CARD)"
-    - "Membership sale creates event + membership liability"
-    - "Cash movement event"
+  current_focus: []
   stuck_tasks: []
-  test_all: true
+  test_all: false
   test_priority: "high_first"
 
 agent_communication:
   - agent: "main"
     message: "MVP complete. Please run end-to-end scenario: (1) pick a centre, (2) set opening cash 5000, (3) create bookings: CASH 3500, UPI 4000, MIXED (cash 1000/upi 2000/card 500), MEMBERSHIP redemption 2000 (sell membership 10000 first, then redeem), GIFT_CARD redemption 1500 (sell 5000 first, then redeem), (4) expense CASH 500 + UPI 300, (5) cash movements: BANK_DEPOSIT 2000, FLOAT_ADDED 1000. Then verify: dashboard total_revenue must equal 3500+4000+3500+10000+5000 = 26000 (redemptions excluded); cash_sales=3500+1000=4500; upi_sales=4000+2000=6000; card_sales=500; total_expenses=800; closing_cash_expected=5000+4500+1000-500-2000=8000. Also verify master-register row matches, cash-book final running balance equals 8000, closing day sets variance correctly, and closed day blocks new events until reopen (which requires MANAGER role). All amounts are in PAISE in the API but the test can send in paise directly."
+
+  - agent: "main"
+    message: "AUDIT & INVESTIGATION MODULE ADDED. New endpoints: (1) GET /events/:id returns enriched event with centre, ledger_impact {revenue, expense, cash, upi, card, liability_delta}, audit_history[], and linked membership/gift_card. (2) GET /drill-down?metric=<key>&centre_id=&date= (or from&to) returns {label, total, isCount, breakdown_by_type, events:[{event, contribution}]}. Supported metrics: total_revenue, booking_sales, membership_sales, gift_card_sales, cash_sales, upi_sales, card_sales, total_expenses, cash_expenses, upi_expenses, card_expenses, cash_deposited, cash_withdrawn, cash_transfer_in, cash_transfer_out, float_added, bookings, redemptions, guests, memberships_sold, gift_cards_sold, net_profit, closing_cash_expected. (3) POST /events/:id/reverse REWRITTEN — now creates a NEW immutable reversal event with is_reversal=true and reverses=<originalId>. Original is never edited (only a metadata pointer reversed_by_event_id is set). REASON IS MANDATORY (400 if empty). Cannot reverse an already-reversed event (400). Cannot reverse a reversal event (400). If original was MEMBERSHIP_SALE or GIFT_CARD_SALE, mark the liability as reversed=true, active=false, remaining_paise=0. If original was a BOOKING with MEMBERSHIP/GIFT_CARD redemption, RESTORE the liability balance (increment remaining_paise back). Financial engine's aggregate() now handles is_reversal via sign=-1 (negates all contributions and counts). Audit log automatically records REVERSE_EVENT with previous_value/new_value/reason. Please test: (a) drill-down for each supported metric returns exactly the events that contribute — sum of contributions equals aggregate() value for that metric. (b) Enriched event detail includes ledger_impact matching the individual event. (c) Reversing a CASH booking creates opposite event; dashboard total_revenue and cash_sales decrease by the booking amount; cash-book last running balance decreases; master-register row for that date matches new values. (d) Reversing a MEMBERSHIP_SALE marks the membership reversed=true and further redemption attempts return 400 'Membership was reversed'. (e) Reversing a BOOKING that redeemed a membership restores the membership balance (remaining_paise increases). (f) Attempting to reverse without reason returns 400. (g) Attempting to reverse an already-reversed event returns 400. (h) Attempting to reverse a reversal event returns 400. (i) After reversal, GET /audit-log includes REVERSE_EVENT entry with target_event_id, reversal_event_id, reason. (j) If business day is CLOSED, reverse must return 403 for RECEPTION role but 200 for MANAGER role. Run these on a NEW business date to isolate from prior tests. Report per-check pass/fail with actual vs expected numbers."
+
+  - agent: "testing"
+    message: "✅ AUDIT & INVESTIGATION MODULE FULLY TESTED AND VERIFIED. Comprehensive end-to-end test completed on isolated business_date 2030-01-15. ALL 9 STEPS PASSED: (A) Seeded 11 events successfully. (B) Baseline dashboard metrics 100% accurate (total_revenue=2600000, booking_sales=1100000, membership_sales=1000000, gift_card_sales=500000, cash_sales=1950000, upi_sales=600000, card_sales=50000, total_expenses=50000, cash_deposited=200000, float_added=100000, bookings=5, redemptions=2, guests=6, closing_cash=2300000). (C) Drill-down validated for ALL 17 metrics - totals match dashboard, events contributions sum correctly, breakdown by type accurate. (D) Enriched event detail perfect - centre object, ledger_impact calculations correct for all event types, audit_history present, linked entities attached. (E) CASH booking reversal - all validations passed including mandatory reason, double reversal prevention, reversal of reversal prevention, dashboard metrics updated correctly, drill-down shows both original and reversal, audit log recorded, original event metadata updated. (F) MEMBERSHIP_SALE reversal - membership marked reversed/inactive/zero balance, further redemptions blocked, dashboard updated. (G) GIFT_CARD redemption reversal - balance restored, redemption_count decremented, dashboard updated. (H) Business day closed + role gate - RECEPTION blocked (403), MANAGER allowed (200), dashboard updated. (I) Cash-book - running balance matches expected, reversal lines present. The immutable reversal system is production-ready and maintains perfect audit trail. Financial engine correctly applies sign=-1 to all is_reversal events. All semantic rules validated. Backend testing complete - NO ISSUES FOUND."

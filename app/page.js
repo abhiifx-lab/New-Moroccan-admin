@@ -7,19 +7,23 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { toast, Toaster } from 'sonner'
 import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
-  BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight
+  BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
+  Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText
 } from 'lucide-react'
 
 // ---------- utils ----------
 const toPaise = (r) => Math.round((Number(r) || 0) * 100)
-const formatINR = (paise) => '₹' + (Number(paise || 0) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const formatINR = (paise) => {
+  const n = Number(paise || 0) / 100
+  const sign = n < 0 ? '-' : ''
+  return sign + '₹' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 const todayStr = () => {
   const d = new Date()
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
@@ -49,21 +53,404 @@ const NAV = [
   { id: 'audit',       label: 'Audit Log',       icon: ShieldCheck },
 ]
 
-// ---------- Stat card ----------
-function Stat({ label, value, hint, accent }) {
+// ============================================================================
+// DRILL-DOWN CONTEXT
+// A single global drill-down dialog. Any component can call openDrill(...) to
+// investigate a metric or open an individual event. It handles Metric → Events
+// → Event Detail → Reverse. On reversal it invokes bump() so every view refreshes.
+// ============================================================================
+const DrillContext = {
+  open: () => {},
+  close: () => {},
+}
+
+function DrillDownDialog({ ctx, role, bump }) {
+  // stage: 'metric' | 'event'
+  const [stage, setStage] = useState('metric')
+  const [loading, setLoading] = useState(false)
+  const [metricData, setMetricData] = useState(null)
+  const [eventDetail, setEventDetail] = useState(null)
+  const [historyStack, setHistoryStack] = useState([])
+  const [reverseOpen, setReverseOpen] = useState(false)
+  const [reverseReason, setReverseReason] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const isOpen = !!ctx
+  const close = () => { DrillContext.close() }
+
+  useEffect(() => {
+    if (!ctx) { setStage('metric'); setMetricData(null); setEventDetail(null); setHistoryStack([]); return }
+    if (ctx.type === 'metric') openMetric(ctx)
+    else if (ctx.type === 'event') openEvent(ctx.eventId)
+  }, [ctx])
+
+  const openMetric = async (c) => {
+    setStage('metric'); setLoading(true); setEventDetail(null)
+    const params = new URLSearchParams({ metric: c.metric })
+    if (c.centre_id) params.set('centre_id', c.centre_id)
+    if (c.date) params.set('date', c.date)
+    if (c.from) params.set('from', c.from)
+    if (c.to) params.set('to', c.to)
+    const d = await apiGet('/drill-down?' + params.toString())
+    setMetricData({ ...d, ctx: c })
+    setLoading(false)
+  }
+  const openEvent = async (id) => {
+    setLoading(true); setStage('event')
+    const d = await apiGet('/events/' + id)
+    setEventDetail(d)
+    setLoading(false)
+  }
+  const goEvent = (id) => {
+    if (metricData) setHistoryStack(s => [...s, { stage: 'metric', metricData }])
+    openEvent(id)
+  }
+  const goBack = () => {
+    if (historyStack.length === 0) return close()
+    const prev = historyStack[historyStack.length - 1]
+    setHistoryStack(s => s.slice(0, -1))
+    if (prev.stage === 'metric') { setMetricData(prev.metricData); setStage('metric'); setEventDetail(null) }
+  }
+
+  const submitReverse = async () => {
+    if (!reverseReason.trim()) { toast.error('Reason is mandatory'); return }
+    setSubmitting(true)
+    const r = await apiPost(`/events/${eventDetail.id}/reverse`, { reason: reverseReason, actor: 'ui-user', role })
+    setSubmitting(false)
+    if (r.error) { toast.error(r.error); return }
+    toast.success('Event reversed. All reports refreshed.')
+    setReverseOpen(false); setReverseReason('')
+    bump()
+    openEvent(eventDetail.id) // refresh detail
+  }
+
   return (
-    <Card className="border-border/50 bg-card/60 backdrop-blur">
+    <>
+      <Dialog open={isOpen} onOpenChange={o => { if (!o) close() }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center gap-2">
+              {historyStack.length > 0 && (
+                <Button variant="ghost" size="icon" onClick={goBack} className="h-7 w-7"><ArrowLeft className="h-4 w-4"/></Button>
+              )}
+              <DialogTitle className="flex-1">
+                {stage === 'metric' && metricData ? `Investigate: ${metricData.label}` : 'Event Detail'}
+              </DialogTitle>
+            </div>
+            <DialogDescription>
+              {stage === 'metric' && metricData && (
+                <span className="text-xs">
+                  {ctx?.date ? `Date: ${ctx.date}` : ctx?.from ? `Range: ${ctx.from} → ${ctx.to}` : ''}
+                  {ctx?.centre_id && ctx.centre_id !== 'ALL' ? ` • Centre filtered` : ' • All centres'}
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {loading && <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>}
+
+          {!loading && stage === 'metric' && metricData && (
+            <MetricStage data={metricData} onEvent={goEvent} />
+          )}
+
+          {!loading && stage === 'event' && eventDetail && (
+            <EventStage ev={eventDetail} onReverse={() => setReverseOpen(true)} role={role} onOpenRelated={goEvent}/>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Reverse confirmation */}
+      <Dialog open={reverseOpen} onOpenChange={setReverseOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Undo2 className="h-4 w-4"/>Reverse Event</DialogTitle>
+            <DialogDescription>This will create an immutable opposite event. The original will remain in the ledger for audit. All reports refresh automatically.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="p-3 rounded border border-amber-500/30 bg-amber-500/5 text-xs flex gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5"/>
+              <div>
+                Reversing role: <b>{role}</b>. If the business day is closed, only Manager+ can reverse.
+                Liability balances (memberships / gift cards) will be restored automatically when applicable.
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Reason (required)</Label>
+              <Textarea value={reverseReason} onChange={e=>setReverseReason(e.target.value)} placeholder="e.g., customer no-show, entered wrong amount, duplicate booking..." rows={3}/>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={()=>setReverseOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={submitReverse} disabled={submitting || !reverseReason.trim()}>
+              <Undo2 className="h-4 w-4 mr-1"/>{submitting ? 'Reversing…' : 'Confirm Reversal'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+function MetricStage({ data, onEvent }) {
+  const [q, setQ] = useState('')
+  const events = data.events || []
+  const filtered = q
+    ? events.filter(x => JSON.stringify(x.event).toLowerCase().includes(q.toLowerCase()))
+    : events
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MiniStat label="Metric Total" value={data.isCount ? data.total : formatINR(data.total)} accent="text-emerald-500"/>
+        <MiniStat label="Events" value={events.length}/>
+        <MiniStat label="Event Types" value={Object.keys(data.breakdown||{}).length}/>
+        <MiniStat label="Includes Reversals" value={events.some(e=>e.event.is_reversal)?'Yes':'No'}/>
+      </div>
+
+      {/* Type breakdown */}
+      <Card>
+        <CardHeader className="py-3"><CardTitle className="text-sm">Breakdown by Event Type</CardTitle></CardHeader>
+        <CardContent className="pt-0">
+          <Table>
+            <TableHeader><TableRow><TableHead>Type</TableHead><TableHead className="text-right">Count</TableHead><TableHead className="text-right">Contribution</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {Object.entries(data.breakdown || {}).map(([t, v]) => (
+                <TableRow key={t}>
+                  <TableCell><Badge variant="secondary">{t}</Badge></TableCell>
+                  <TableCell className="text-right">{v.count}</TableCell>
+                  <TableCell className="text-right font-medium">{data.isCount ? v.total : formatINR(v.total)}</TableCell>
+                </TableRow>
+              ))}
+              {Object.keys(data.breakdown || {}).length === 0 && (
+                <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">No contributing events</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* Individual events */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1"><Search className="h-4 w-4 absolute left-2 top-2.5 text-muted-foreground"/><Input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search events…" className="pl-8"/></div>
+        <div className="text-xs text-muted-foreground">{filtered.length} events</div>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Time</TableHead><TableHead>Type</TableHead><TableHead>Customer / Ref</TableHead>
+              <TableHead>Pay</TableHead><TableHead className="text-right">Contribution</TableHead><TableHead></TableHead>
+            </TableRow></TableHeader>
+            <TableBody>
+              {filtered.map(({ event: e, contribution }) => (
+                <TableRow key={e.id} className={e.is_reversal ? 'opacity-80' : ''}>
+                  <TableCell className="text-xs">{new Date(e.created_at).toLocaleString('en-IN', { hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short' })}</TableCell>
+                  <TableCell>
+                    <Badge variant={e.is_reversal ? 'destructive' : 'secondary'} className="mr-1">{e.type}</Badge>
+                    {e.is_reversal && <Badge variant="outline" className="text-[10px]">REV</Badge>}
+                    {e.reversed_by_event_id && <Badge variant="outline" className="text-[10px] ml-1">REVERSED</Badge>}
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {e.customer || e.category || e.movement_type?.replace(/_/g,' ') || '—'}
+                    {e.membership_code && <span className="ml-1 font-mono text-[10px] text-muted-foreground">{e.membership_code}</span>}
+                    {e.gift_card_code && <span className="ml-1 font-mono text-[10px] text-muted-foreground">{e.gift_card_code}</span>}
+                  </TableCell>
+                  <TableCell><Badge variant="outline" className="text-[10px]">{e.payment_method || '—'}</Badge></TableCell>
+                  <TableCell className={`text-right font-medium ${contribution<0?'text-rose-500':''}`}>
+                    {data.isCount ? contribution : formatINR(contribution)}
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" onClick={()=>onEvent(e.id)}>Detail<ChevronRight className="h-3 w-3 ml-1"/></Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {filtered.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No events</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+function MiniStat({ label, value, accent }) {
+  return (
+    <div className="rounded-md border border-border/50 p-3 bg-card/40">
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground">{label}</div>
+      <div className={`text-lg font-semibold mt-0.5 ${accent||''}`}>{value}</div>
+    </div>
+  )
+}
+
+function EventStage({ ev, onReverse, role, onOpenRelated }) {
+  const li = ev.ledger_impact || {}
+  const canReverse = !ev.is_reversal && !ev.reversed_by_event_id
+  return (
+    <div className="space-y-4">
+      {/* Header banner */}
+      <div className="flex items-start justify-between gap-3 rounded-lg border border-border/50 p-4 bg-gradient-to-br from-card to-muted/20">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge variant={ev.is_reversal ? 'destructive' : 'default'} className="text-xs">{ev.type}</Badge>
+            {ev.is_reversal && <Badge variant="outline">REVERSAL EVENT</Badge>}
+            {ev.reversed_by_event_id && <Badge variant="outline" className="text-rose-500">REVERSED</Badge>}
+            <Badge variant="outline">{ev.payment_method || ev.movement_type || '—'}</Badge>
+          </div>
+          <div className="mt-2 text-2xl font-semibold">{formatINR(ev.amount)}</div>
+          <div className="text-xs text-muted-foreground font-mono">{ev.id}</div>
+        </div>
+        {canReverse && (
+          <Button variant="destructive" onClick={onReverse}><Undo2 className="h-4 w-4 mr-1"/>Reverse Event</Button>
+        )}
+      </div>
+
+      {/* Info grid */}
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card><CardHeader className="py-3"><CardTitle className="text-sm flex items-center gap-2"><FileText className="h-4 w-4"/>Event Info</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-1.5 pt-0">
+            <KV k="Type" v={ev.type}/>
+            <KV k="Business Date" v={ev.business_date}/>
+            <KV k="Created At" v={new Date(ev.created_at).toLocaleString('en-IN')}/>
+            <KV k="Created By" v={ev.created_by}/>
+            {ev.customer && <KV k="Customer" v={ev.customer}/>}
+            {ev.therapist && <KV k="Therapist" v={ev.therapist}/>}
+            {ev.service_name && <KV k="Service" v={ev.service_name}/>}
+            {ev.category && <KV k="Category" v={ev.category}/>}
+            {ev.vendor && <KV k="Vendor" v={ev.vendor}/>}
+            {ev.movement_type && <KV k="Movement" v={ev.movement_type.replace(/_/g,' ')}/>}
+            {ev.membership_code && <KV k="Membership Code" v={<span className="font-mono">{ev.membership_code}</span>}/>}
+            {ev.gift_card_code && <KV k="Gift Card Code" v={<span className="font-mono">{ev.gift_card_code}</span>}/>}
+            {ev.redemption_ref && <KV k="Redeemed" v={<span className="font-mono">{ev.redemption_ref}</span>}/>}
+            {ev.notes && <KV k="Notes" v={ev.notes}/>}
+          </CardContent>
+        </Card>
+
+        <Card><CardHeader className="py-3"><CardTitle className="text-sm flex items-center gap-2"><MapPin className="h-4 w-4"/>Financial Impact</CardTitle></CardHeader>
+          <CardContent className="text-sm space-y-1.5 pt-0">
+            <KV k="Revenue" v={<span className={li.revenue>=0?'text-emerald-500':'text-rose-500'}>{formatINR(li.revenue)}</span>}/>
+            <KV k="Expense" v={<span className={li.expense<=0?'text-muted-foreground':'text-rose-500'}>{formatINR(li.expense)}</span>}/>
+            <KV k="Cash Impact" v={<span className={li.cash>=0?'text-emerald-500':'text-rose-500'}>{formatINR(li.cash)}</span>}/>
+            <KV k="UPI Impact" v={formatINR(li.upi)}/>
+            <KV k="Card Impact" v={formatINR(li.card)}/>
+            <KV k="Liability Delta" v={<span className={li.liability_delta>0?'text-amber-500':'text-emerald-500'}>{formatINR(li.liability_delta)}</span>}/>
+            {ev.payment_breakdown && (
+              <div className="mt-2 pt-2 border-t border-border/50 text-xs">
+                <div className="text-muted-foreground mb-1">Mixed Payment Split</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>Cash: {formatINR(ev.payment_breakdown.cash)}</div>
+                  <div>UPI: {formatINR(ev.payment_breakdown.upi)}</div>
+                  <div>Card: {formatINR(ev.payment_breakdown.card)}</div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {ev.centre && (
+          <Card><CardHeader className="py-3"><CardTitle className="text-sm flex items-center gap-2"><Building2 className="h-4 w-4"/>Centre</CardTitle></CardHeader>
+            <CardContent className="text-sm pt-0 space-y-1.5">
+              <KV k="Name" v={ev.centre.name}/>
+              <KV k="Code" v={ev.centre.code}/>
+              <KV k="City" v={ev.centre.city}/>
+            </CardContent>
+          </Card>
+        )}
+
+        {(ev.membership || ev.gift_card) && (
+          <Card><CardHeader className="py-3"><CardTitle className="text-sm flex items-center gap-2"><CreditCard className="h-4 w-4"/>Linked {ev.membership?'Membership':'Gift Card'}</CardTitle></CardHeader>
+            <CardContent className="text-sm pt-0 space-y-1.5">
+              {(ev.membership || ev.gift_card) && (
+                <>
+                  <KV k="Code" v={<span className="font-mono">{(ev.membership||ev.gift_card).code}</span>}/>
+                  <KV k="Customer" v={(ev.membership||ev.gift_card).customer || (ev.gift_card?.buyer)}/>
+                  <KV k="Initial" v={formatINR((ev.membership||ev.gift_card).initial_paise)}/>
+                  <KV k="Remaining" v={<b>{formatINR((ev.membership||ev.gift_card).remaining_paise)}</b>}/>
+                  <KV k="Redemptions" v={(ev.membership||ev.gift_card).redemption_count || 0}/>
+                  {(ev.membership||ev.gift_card).reversed && <Badge variant="destructive">REVERSED</Badge>}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      {/* Reversal linkage */}
+      {(ev.reversal_event || ev.original_event) && (
+        <Card><CardHeader className="py-3"><CardTitle className="text-sm">Reversal Linkage</CardTitle></CardHeader>
+          <CardContent className="pt-0 text-sm space-y-2">
+            {ev.reversal_event && (
+              <div className="flex items-center justify-between">
+                <div>Reversed by event <span className="font-mono text-xs">{ev.reversal_event.id.slice(0,8)}</span> on {new Date(ev.reversal_event.created_at).toLocaleString('en-IN')}</div>
+                <Button variant="outline" size="sm" onClick={()=>onOpenRelated(ev.reversal_event.id)}>Open Reversal<ChevronRight className="h-3 w-3 ml-1"/></Button>
+              </div>
+            )}
+            {ev.original_event && (
+              <div className="flex items-center justify-between">
+                <div>Reverses original event <span className="font-mono text-xs">{ev.original_event.id.slice(0,8)}</span></div>
+                <Button variant="outline" size="sm" onClick={()=>onOpenRelated(ev.original_event.id)}>Open Original<ChevronRight className="h-3 w-3 ml-1"/></Button>
+              </div>
+            )}
+            {ev.reversal_reason && <div className="text-xs bg-muted p-2 rounded"><b>Reason:</b> {ev.reversal_reason}</div>}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Audit trail */}
+      <Card>
+        <CardHeader className="py-3"><CardTitle className="text-sm flex items-center gap-2"><Clock className="h-4 w-4"/>Audit History</CardTitle></CardHeader>
+        <CardContent className="pt-0">
+          <Table>
+            <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>Role</TableHead><TableHead>Details</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {(ev.audit_history || []).map(a => (
+                <TableRow key={a.id}>
+                  <TableCell className="text-xs">{new Date(a.created_at).toLocaleString('en-IN')}</TableCell>
+                  <TableCell><Badge>{a.action}</Badge></TableCell>
+                  <TableCell>{a.actor}</TableCell>
+                  <TableCell>{a.role}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{a.reason || JSON.stringify(a.new_value || {})}</TableCell>
+                </TableRow>
+              ))}
+              {(ev.audit_history || []).length === 0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground">No audit entries</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+function KV({ k, v }) {
+  return <div className="flex justify-between gap-2"><span className="text-muted-foreground">{k}</span><span className="text-right">{v}</span></div>
+}
+
+// ============================================================================
+// UI PRIMITIVES
+// ============================================================================
+function Stat({ label, value, hint, accent, onClick }) {
+  const clickable = !!onClick
+  return (
+    <Card className={`border-border/50 bg-card/60 backdrop-blur ${clickable?'cursor-pointer hover:border-primary/50 transition-colors':''}`} onClick={onClick}>
       <CardContent className="p-5">
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">{label}</div>
+        <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center justify-between">{label}{clickable && <Search className="h-3 w-3 opacity-40"/>}</div>
         <div className={`mt-1 text-2xl font-semibold ${accent||''}`}>{value}</div>
         {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
       </CardContent>
     </Card>
   )
 }
+function Row({ k, v, bold, onClick }) {
+  return (
+    <div className={`flex justify-between ${onClick?'cursor-pointer hover:text-primary transition-colors':''}`} onClick={onClick}>
+      <span className="text-muted-foreground">{k}</span><span className={bold?'font-semibold':''}>{v}</span>
+    </div>
+  )
+}
+function Field({ l, children }) { return <div className="space-y-1"><Label className="text-xs text-muted-foreground">{l}</Label>{children}</div> }
 
-// ---------- DASHBOARD ----------
-function DashboardView({ centre, refreshTick }) {
+// ============================================================================
+// DASHBOARD
+// ============================================================================
+function DashboardView({ centre, refreshTick, onDrill }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState(todayStr())
@@ -73,14 +460,15 @@ function DashboardView({ centre, refreshTick }) {
     setData(d); setLoading(false)
   }, [centre?.id, date])
   useEffect(() => { load() }, [load, refreshTick])
-
   const a = data?.agg || {}
+  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Live Dashboard</h2>
-          <p className="text-sm text-muted-foreground">Single source of truth — every number below is aggregated from the immutable event ledger.</p>
+          <p className="text-sm text-muted-foreground">Every number is clickable — drill down to source events.</p>
         </div>
         <div className="flex items-center gap-2">
           <Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
@@ -89,58 +477,57 @@ function DashboardView({ centre, refreshTick }) {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat label="Today's Revenue" value={formatINR(a.total_revenue)} hint={`${a.bookings||0} bookings • ${a.redemptions||0} redemptions`} accent="text-emerald-500"/>
-        <Stat label="Guests" value={a.guests||0} hint="Unique customers today"/>
-        <Stat label="Expenses" value={formatINR(a.total_expenses)} hint={`${a.expenses_count||0} entries`} accent="text-rose-500"/>
-        <Stat label="Cash in Drawer" value={formatINR(a.closing_cash_expected)} hint={`Opening ${formatINR(a.opening_cash)}`}/>
+        <Stat label="Today's Revenue" value={formatINR(a.total_revenue)} hint={`${a.bookings||0} bookings • ${a.redemptions||0} redemptions`} accent="text-emerald-500" onClick={()=>drill('total_revenue')}/>
+        <Stat label="Guests" value={a.guests||0} hint="Unique customers today" onClick={()=>drill('guests')}/>
+        <Stat label="Expenses" value={formatINR(a.total_expenses)} hint={`${a.expenses_count||0} entries`} accent="text-rose-500" onClick={()=>drill('total_expenses')}/>
+        <Stat label="Cash in Drawer" value={formatINR(a.closing_cash_expected)} hint={`Opening ${formatINR(a.opening_cash)}`} onClick={()=>drill('closing_cash_expected')}/>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Sales Mix</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <Row k="Booking Sales" v={formatINR(a.booking_sales)} />
-            <Row k="Membership Sales" v={formatINR(a.membership_sales)} />
-            <Row k="Gift Card Sales" v={formatINR(a.gift_card_sales)} />
+            <Row k="Booking Sales" v={formatINR(a.booking_sales)} onClick={()=>drill('booking_sales')}/>
+            <Row k="Membership Sales" v={formatINR(a.membership_sales)} onClick={()=>drill('membership_sales')}/>
+            <Row k="Gift Card Sales" v={formatINR(a.gift_card_sales)} onClick={()=>drill('gift_card_sales')}/>
             <div className="border-t border-border/50 my-2"></div>
-            <Row k="Total Revenue" v={formatINR(a.total_revenue)} bold />
+            <Row k="Total Revenue" v={formatINR(a.total_revenue)} bold onClick={()=>drill('total_revenue')}/>
           </CardContent>
         </Card>
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Payment Method</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <Row k="Cash Sales" v={formatINR(a.cash_sales)} />
-            <Row k="UPI Sales" v={formatINR(a.upi_sales)} />
-            <Row k="Card Sales" v={formatINR(a.card_sales)} />
+            <Row k="Cash Sales" v={formatINR(a.cash_sales)} onClick={()=>drill('cash_sales')}/>
+            <Row k="UPI Sales" v={formatINR(a.upi_sales)} onClick={()=>drill('upi_sales')}/>
+            <Row k="Card Sales" v={formatINR(a.card_sales)} onClick={()=>drill('card_sales')}/>
           </CardContent>
         </Card>
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Cash Movement</CardTitle></CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <Row k="Deposited to Bank" v={formatINR(a.cash_deposited)} />
-            <Row k="Owner Withdrawal" v={formatINR(a.cash_withdrawn)} />
-            <Row k="Transfer In" v={formatINR(a.cash_transfer_in)} />
-            <Row k="Transfer Out" v={formatINR(a.cash_transfer_out)} />
-            <Row k="Float Added" v={formatINR(a.float_added)} />
+            <Row k="Deposited to Bank" v={formatINR(a.cash_deposited)} onClick={()=>drill('cash_deposited')}/>
+            <Row k="Owner Withdrawal" v={formatINR(a.cash_withdrawn)} onClick={()=>drill('cash_withdrawn')}/>
+            <Row k="Transfer In" v={formatINR(a.cash_transfer_in)} onClick={()=>drill('cash_transfer_in')}/>
+            <Row k="Transfer Out" v={formatINR(a.cash_transfer_out)} onClick={()=>drill('cash_transfer_out')}/>
+            <Row k="Float Added" v={formatINR(a.float_added)} onClick={()=>drill('float_added')}/>
           </CardContent>
         </Card>
       </div>
 
       <Card>
-        <CardHeader><CardTitle className="text-sm text-muted-foreground">P&L Snapshot</CardTitle></CardHeader>
+        <CardHeader><CardTitle className="text-sm text-muted-foreground">P&amp;L Snapshot</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-3 gap-4">
-          <Stat label="Revenue" value={formatINR(a.total_revenue)} accent="text-emerald-500"/>
-          <Stat label="Expenses" value={formatINR(a.total_expenses)} accent="text-rose-500"/>
-          <Stat label="Net Profit" value={formatINR(a.net_profit)} accent={(a.net_profit||0)>=0?'text-emerald-500':'text-rose-500'}/>
+          <Stat label="Revenue" value={formatINR(a.total_revenue)} accent="text-emerald-500" onClick={()=>drill('total_revenue')}/>
+          <Stat label="Expenses" value={formatINR(a.total_expenses)} accent="text-rose-500" onClick={()=>drill('total_expenses')}/>
+          <Stat label="Net Profit" value={formatINR(a.net_profit)} accent={(a.net_profit||0)>=0?'text-emerald-500':'text-rose-500'} onClick={()=>drill('net_profit')}/>
         </CardContent>
       </Card>
       {loading && <div className="text-xs text-muted-foreground">Loading...</div>}
     </div>
   )
 }
-function Row({ k, v, bold }) {
-  return <div className="flex justify-between"><span className="text-muted-foreground">{k}</span><span className={bold?'font-semibold':''}>{v}</span></div>
-}
 
-// ---------- BOOKING ----------
-function BookingView({ centre, role, bump }) {
+// ============================================================================
+// BOOKING
+// ============================================================================
+function BookingView({ centre, role, bump, onDrill, refreshTick }) {
   const [services, setServices] = useState([])
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
@@ -149,13 +536,13 @@ function BookingView({ centre, role, bump }) {
     const [s, e] = await Promise.all([apiGet('/services'), apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=BOOKING`)])
     setServices(s); setEvents(e)
   }
-  useEffect(() => { if (centre?.id) load() }, [centre?.id])
+  useEffect(() => { if (centre?.id) load() }, [centre?.id, refreshTick])
 
   const submit = async () => {
     const svc = services.find(x => x.id === f.service_id)
-    const amount = toPaise(f.amount || svc?.price_paise/100 || 0)
+    const amount = toPaise(f.amount || (svc ? svc.price_paise/100 : 0))
     const body = {
-      centre_id: centre.id, created_by: role,
+      centre_id: centre.id, created_by: role, role,
       customer: f.customer, therapist: f.therapist,
       service_id: f.service_id, service_name: svc?.name || '',
       amount, payment_method: f.payment_method,
@@ -172,10 +559,7 @@ function BookingView({ centre, role, bump }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Bookings</h2>
-          <p className="text-sm text-muted-foreground">Every booking creates one immutable event.</p>
-        </div>
+        <div><h2 className="text-2xl font-semibold">Bookings</h2><p className="text-sm text-muted-foreground">Every booking creates one immutable event. Click any row for full detail + reverse.</p></div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>New Booking</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
@@ -193,9 +577,7 @@ function BookingView({ centre, role, bump }) {
               <Field l="Payment">
                 <Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}>
                   <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    {['CASH','UPI','CARD','MIXED','MEMBERSHIP','GIFT_CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}
-                  </SelectContent>
+                  <SelectContent>{['CASH','UPI','CARD','MIXED','MEMBERSHIP','GIFT_CARD'].map(x=><SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
               {(f.payment_method==='MEMBERSHIP'||f.payment_method==='GIFT_CARD') && (
@@ -218,17 +600,20 @@ function BookingView({ centre, role, bump }) {
 
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
+            {events.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
             {events.map(e=>(
-              <TableRow key={e.id}>
+              <TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({ type:'event', eventId:e.id })}>
                 <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
-                <TableCell>{e.customer}</TableCell>
-                <TableCell>{e.service_name}</TableCell>
-                <TableCell>{e.therapist}</TableCell>
-                <TableCell><Badge variant="secondary">{e.payment_method}</Badge></TableCell>
+                <TableCell>{e.customer}</TableCell><TableCell>{e.service_name}</TableCell><TableCell>{e.therapist}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{e.payment_method}</Badge>
+                  {e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}
+                  {e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}
+                </TableCell>
                 <TableCell className="text-right font-medium">{(e.payment_method==='MEMBERSHIP'||e.payment_method==='GIFT_CARD')?<span className="text-muted-foreground">redeemed</span>:formatINR(e.amount)}</TableCell>
+                <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -237,27 +622,25 @@ function BookingView({ centre, role, bump }) {
     </div>
   )
 }
-function Field({ l, children }) {
-  return <div className="space-y-1"><Label className="text-xs text-muted-foreground">{l}</Label>{children}</div>
-}
 
-// ---------- MEMBERSHIP ----------
-function MembershipView({ centre, role, bump }) {
+// ============================================================================
+// MEMBERSHIP / GIFT CARD / EXPENSE / CASH MOVEMENT (same as before, with drill)
+// ============================================================================
+function MembershipView({ centre, role, bump, refreshTick }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({ customer:'', phone:'', amount:'', payment_method:'CASH' })
   const load = async () => setList(await apiGet('/memberships'))
-  useEffect(()=>{load()},[])
+  useEffect(()=>{load()},[refreshTick])
   const submit = async () => {
-    const r = await apiPost('/events/membership', { ...f, centre_id: centre.id, created_by: role, amount: toPaise(f.amount) })
+    const r = await apiPost('/events/membership', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
     toast.success(`Membership ${r.membership.code} sold`); setOpen(false); setF({ customer:'', phone:'', amount:'', payment_method:'CASH' }); bump(); load()
   }
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-semibold">Memberships</h2>
-          <p className="text-sm text-muted-foreground">Sale creates revenue + liability. Redemption creates operational usage only.</p></div>
+        <div><h2 className="text-2xl font-semibold">Memberships</h2><p className="text-sm text-muted-foreground">Sale = revenue + liability. Redemption = operational usage only.</p></div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Sell Membership</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>Sell Membership — {centre.name}</DialogTitle></DialogHeader>
@@ -274,16 +657,17 @@ function MembershipView({ centre, role, bump }) {
       </div>
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Customer</TableHead><TableHead>Sold At</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Redemptions</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Customer</TableHead><TableHead>Sold At</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Redemptions</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
           <TableBody>
-            {list.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No memberships</TableCell></TableRow>}
-            {list.map(m=>(<TableRow key={m.code}>
+            {list.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No memberships</TableCell></TableRow>}
+            {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
               <TableCell className="font-mono text-xs">{m.code}</TableCell>
               <TableCell>{m.customer}</TableCell>
               <TableCell className="text-xs">{m.sold_business_date}</TableCell>
               <TableCell className="text-right">{formatINR(m.initial_paise)}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(m.remaining_paise)}</TableCell>
               <TableCell>{m.redemption_count}</TableCell>
+              <TableCell>{m.reversed ? <Badge variant="destructive">REVERSED</Badge> : <Badge variant="secondary">ACTIVE</Badge>}</TableCell>
             </TableRow>))}
           </TableBody>
         </Table>
@@ -292,15 +676,14 @@ function MembershipView({ centre, role, bump }) {
   )
 }
 
-// ---------- GIFT CARDS ----------
-function GiftCardView({ centre, role, bump }) {
+function GiftCardView({ centre, role, bump, refreshTick }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({ customer:'', recipient:'', amount:'', payment_method:'CASH' })
   const load = async () => setList(await apiGet('/gift-cards'))
-  useEffect(()=>{load()},[])
+  useEffect(()=>{load()},[refreshTick])
   const submit = async () => {
-    const r = await apiPost('/events/gift-card', { ...f, centre_id: centre.id, created_by: role, amount: toPaise(f.amount) })
+    const r = await apiPost('/events/gift-card', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
     toast.success(`Gift card ${r.gift_card.code} sold`); setOpen(false); setF({ customer:'', recipient:'', amount:'', payment_method:'CASH' }); bump(); load()
   }
@@ -324,13 +707,14 @@ function GiftCardView({ centre, role, bump }) {
       </div>
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Buyer</TableHead><TableHead>Recipient</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Buyer</TableHead><TableHead>Recipient</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
           <TableBody>
-            {list.length===0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">No gift cards</TableCell></TableRow>}
-            {list.map(m=>(<TableRow key={m.code}>
+            {list.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No gift cards</TableCell></TableRow>}
+            {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
               <TableCell className="font-mono text-xs">{m.code}</TableCell><TableCell>{m.buyer}</TableCell><TableCell>{m.recipient}</TableCell>
               <TableCell className="text-right">{formatINR(m.initial_paise)}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(m.remaining_paise)}</TableCell>
+              <TableCell>{m.reversed ? <Badge variant="destructive">REVERSED</Badge> : <Badge variant="secondary">ACTIVE</Badge>}</TableCell>
             </TableRow>))}
           </TableBody>
         </Table>
@@ -339,15 +723,14 @@ function GiftCardView({ centre, role, bump }) {
   )
 }
 
-// ---------- EXPENSE ----------
-function ExpenseView({ centre, role, bump }) {
+function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({ amount:'', payment_method:'CASH', category:'Utilities', vendor:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=EXPENSE`))
-  useEffect(()=>{ if(centre?.id) load()},[centre?.id])
+  useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
   const submit = async () => {
-    const r = await apiPost('/events/expense', { ...f, centre_id: centre.id, created_by: role, amount: toPaise(f.amount) })
+    const r = await apiPost('/events/expense', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
     toast.success('Expense recorded'); setOpen(false); setF({ amount:'', payment_method:'CASH', category:'Utilities', vendor:'', notes:'' }); bump(); load()
   }
@@ -372,14 +755,15 @@ function ExpenseView({ centre, role, bump }) {
         </Dialog>
       </div>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Category</TableHead><TableHead>Vendor</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Category</TableHead><TableHead>Vendor</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">No expenses today</TableCell></TableRow>}
-            {events.map(e=>(<TableRow key={e.id}>
+            {events.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No expenses today</TableCell></TableRow>}
+            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
               <TableCell>{e.category}</TableCell><TableCell>{e.vendor}</TableCell>
-              <TableCell><Badge variant="secondary">{e.payment_method}</Badge></TableCell>
+              <TableCell><Badge variant="secondary">{e.payment_method}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-right font-medium text-rose-500">{formatINR(e.amount)}</TableCell>
+              <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
             </TableRow>))}
           </TableBody></Table>
       </CardContent></Card>
@@ -387,22 +771,21 @@ function ExpenseView({ centre, role, bump }) {
   )
 }
 
-// ---------- CASH MOVEMENT ----------
-function CashMovementView({ centre, centres, role, bump }) {
+function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick }) {
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
   const [f, setF] = useState({ amount:'', movement_type:'BANK_DEPOSIT', counterparty_centre_id:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=CASH_MOVEMENT`))
-  useEffect(()=>{ if(centre?.id) load()},[centre?.id])
+  useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
   const submit = async () => {
-    const r = await apiPost('/events/cash-movement', { ...f, centre_id: centre.id, created_by: role, amount: toPaise(f.amount) })
+    const r = await apiPost('/events/cash-movement', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
     if (r.error) return toast.error(r.error)
     toast.success('Cash movement recorded'); setOpen(false); setF({ amount:'', movement_type:'BANK_DEPOSIT', counterparty_centre_id:'', notes:'' }); bump(); load()
   }
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-semibold">Cash Movement</h2><p className="text-sm text-muted-foreground">Never revenue. Never expense. Only cash position changes.</p></div>
+        <div><h2 className="text-2xl font-semibold">Cash Movement</h2><p className="text-sm text-muted-foreground">Never revenue. Never expense. Only cash position.</p></div>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Record Movement</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>Cash Movement — {centre.name}</DialogTitle></DialogHeader>
@@ -421,14 +804,15 @@ function CashMovementView({ centre, centres, role, bump }) {
         </Dialog>
       </div>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Type</TableHead><TableHead>Notes</TableHead><TableHead className="text-right">Amount</TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Type</TableHead><TableHead>Notes</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={4} className="text-center text-muted-foreground py-6">No cash movements today</TableCell></TableRow>}
-            {events.map(e=>(<TableRow key={e.id}>
+            {events.length===0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">No cash movements today</TableCell></TableRow>}
+            {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||e.reversed_by_event_id?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
-              <TableCell><Badge>{e.movement_type.replace(/_/g,' ')}</Badge></TableCell>
+              <TableCell><Badge>{e.movement_type.replace(/_/g,' ')}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{e.reversed_by_event_id && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-xs">{e.notes}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(e.amount)}</TableCell>
+              <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
             </TableRow>))}
           </TableBody></Table>
       </CardContent></Card>
@@ -436,8 +820,10 @@ function CashMovementView({ centre, centres, role, bump }) {
   )
 }
 
-// ---------- MASTER REGISTER ----------
-function RegisterView({ centre }) {
+// ============================================================================
+// MASTER REGISTER (drill on every cell)
+// ============================================================================
+function RegisterView({ centre, onDrill, refreshTick }) {
   const [rows, setRows] = useState([])
   const [from, setFrom] = useState(() => { const d=new Date(); d.setDate(d.getDate()-13); return d.toISOString().slice(0,10) })
   const [to, setTo] = useState(todayStr())
@@ -445,15 +831,15 @@ function RegisterView({ centre }) {
     const r = await apiGet(`/master-register?centre_id=${centre?.id||'ALL'}&from=${from}&to=${to}`)
     setRows(r.rows || [])
   }, [centre?.id, from, to])
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshTick])
+  const drill = (metric, date) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-semibold">Master Register</h2><p className="text-sm text-muted-foreground">Excel-like daily aggregate. Every column is computed from the same event ledger.</p></div>
+        <div><h2 className="text-2xl font-semibold">Master Register</h2><p className="text-sm text-muted-foreground">Excel-like daily aggregate. Every cell is clickable — drills to source events.</p></div>
         <div className="flex items-center gap-2">
           <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
-          <span>—</span>
-          <Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
+          <span>—</span><Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
           <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
         </div>
       </div>
@@ -470,22 +856,26 @@ function RegisterView({ centre }) {
           </TableRow></TableHeader>
           <TableBody>
             {rows.length===0 && <TableRow><TableCell colSpan={14} className="text-center text-muted-foreground py-6">No data in range</TableCell></TableRow>}
-            {rows.map(r=>(<TableRow key={r.business_date}>
-              <TableCell className="font-medium">{r.business_date}</TableCell>
-              <TableCell className="text-right">{formatINR(r.opening_cash)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.booking_sales)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.membership_sales)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.gift_card_sales)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.cash_sales)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.upi_sales)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.card_sales)}</TableCell>
-              <TableCell className="text-right text-rose-500">{formatINR(r.total_expenses)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.cash_deposited)}</TableCell>
-              <TableCell className="text-right">{formatINR(r.cash_withdrawn)}</TableCell>
-              <TableCell className="text-right font-semibold">{formatINR(r.closing_cash_expected)}</TableCell>
-              <TableCell className="text-right">{r.guests}</TableCell>
-              <TableCell><Badge variant={r.status==='CLOSED'?'default':'secondary'}>{r.status}</Badge></TableCell>
-            </TableRow>))}
+            {rows.map(r=>{
+              const D = (metric) => <span className="cursor-pointer hover:text-primary transition-colors" onClick={()=>drill(metric, r.business_date)}>{ }</span>
+              const Cell = (metric, value, cls='') => <TableCell className={`text-right cursor-pointer hover:bg-muted ${cls}`} onClick={()=>drill(metric, r.business_date)}>{value}</TableCell>
+              return (<TableRow key={r.business_date}>
+                <TableCell className="font-medium">{r.business_date}</TableCell>
+                <TableCell className="text-right">{formatINR(r.opening_cash)}</TableCell>
+                {Cell('booking_sales', formatINR(r.booking_sales))}
+                {Cell('membership_sales', formatINR(r.membership_sales))}
+                {Cell('gift_card_sales', formatINR(r.gift_card_sales))}
+                {Cell('cash_sales', formatINR(r.cash_sales))}
+                {Cell('upi_sales', formatINR(r.upi_sales))}
+                {Cell('card_sales', formatINR(r.card_sales))}
+                {Cell('total_expenses', formatINR(r.total_expenses), 'text-rose-500')}
+                {Cell('cash_deposited', formatINR(r.cash_deposited))}
+                {Cell('cash_withdrawn', formatINR(r.cash_withdrawn))}
+                {Cell('closing_cash_expected', formatINR(r.closing_cash_expected), 'font-semibold')}
+                {Cell('guests', r.guests)}
+                <TableCell><Badge variant={r.status==='CLOSED'?'default':'secondary'}>{r.status}</Badge></TableCell>
+              </TableRow>)
+            })}
           </TableBody>
         </Table>
       </CardContent></Card>
@@ -493,18 +883,20 @@ function RegisterView({ centre }) {
   )
 }
 
-// ---------- CASH BOOK ----------
-function CashBookView({ centre }) {
+// ============================================================================
+// CASH BOOK (each line drillable to event)
+// ============================================================================
+function CashBookView({ centre, onDrill, refreshTick }) {
   const [data, setData] = useState(null)
   const [date, setDate] = useState(todayStr())
   const load = useCallback(async () => { setData(await apiGet(`/cash-book?centre_id=${centre.id}&date=${date}`)) }, [centre?.id, date])
-  useEffect(()=>{ if(centre?.id) load()}, [load])
+  useEffect(()=>{ if(centre?.id) load()}, [load, refreshTick])
   const lines = data?.lines || []
   const agg = data?.agg || {}
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-semibold">Cash Book</h2><p className="text-sm text-muted-foreground">Cash-only ledger with running balance.</p></div>
+        <div><h2 className="text-2xl font-semibold">Cash Book</h2><p className="text-sm text-muted-foreground">Cash-only ledger with running balance. Click any line to inspect the source event.</p></div>
         <div className="flex items-center gap-2"><Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]"/><Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button></div>
       </div>
       <div className="grid grid-cols-3 gap-4">
@@ -515,9 +907,9 @@ function CashBookView({ centre }) {
       <Card><CardContent className="p-0">
         <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Ref</TableHead><TableHead>Description</TableHead><TableHead className="text-right">In</TableHead><TableHead className="text-right">Out</TableHead><TableHead className="text-right">Balance</TableHead></TableRow></TableHeader>
           <TableBody>
-            {lines.map((l,i)=>(<TableRow key={i}>
+            {lines.map((l,i)=>(<TableRow key={i} className={`${l.event_id?'cursor-pointer hover:bg-muted/50':''} ${l.is_reversal?'opacity-70':''}`} onClick={()=>l.event_id && onDrill({type:'event', eventId:l.event_id})}>
               <TableCell className="text-xs">{l.time?new Date(l.time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}):'—'}</TableCell>
-              <TableCell className="text-xs"><Badge variant="outline">{l.ref}</Badge></TableCell>
+              <TableCell className="text-xs"><Badge variant="outline">{l.ref}</Badge>{l.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}</TableCell>
               <TableCell>{l.desc}</TableCell>
               <TableCell className="text-right text-emerald-500">{l.in?formatINR(l.in):''}</TableCell>
               <TableCell className="text-right text-rose-500">{l.out?formatINR(l.out):''}</TableCell>
@@ -529,19 +921,21 @@ function CashBookView({ centre }) {
   )
 }
 
-// ---------- BUSINESS DAY CLOSE ----------
-function CloseView({ centre, role, bump }) {
+// ============================================================================
+// BUSINESS DAY CLOSE (with drill on every metric)
+// ============================================================================
+function CloseView({ centre, role, bump, onDrill, refreshTick }) {
   const [bd, setBd] = useState(null)
   const [dash, setDash] = useState(null)
   const [declared, setDeclared] = useState('')
   const [notes, setNotes] = useState('')
   const [openingInput, setOpeningInput] = useState('')
-  const load = async () => {
+  const load = useCallback(async () => {
     const b = await apiGet(`/business-day?centre_id=${centre.id}&date=${todayStr()}`)
     setBd(b); setOpeningInput(((b?.opening_cash||0)/100).toString())
     setDash(await apiGet(`/dashboard?centre_id=${centre.id}&date=${todayStr()}`))
-  }
-  useEffect(()=>{ if(centre?.id) load() }, [centre?.id])
+  }, [centre?.id])
+  useEffect(()=>{ if(centre?.id) load() }, [load, refreshTick])
   const setOpening = async () => {
     await apiPost('/business-day/set-opening', { centre_id: centre.id, opening_cash: toPaise(openingInput) })
     toast.success('Opening cash set'); load(); bump()
@@ -559,15 +953,15 @@ function CloseView({ centre, role, bump }) {
     toast.success('Day reopened'); load(); bump()
   }
   const agg = dash?.agg || {}
+  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date: todayStr() })
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Business Day — {centre.name}</h2>
       <div className="grid md:grid-cols-3 gap-4">
         <Stat label="Status" value={<Badge variant={bd?.status==='CLOSED'?'default':'secondary'}>{bd?.status||'—'}</Badge>}/>
         <Stat label="Opening Cash" value={formatINR(bd?.opening_cash)}/>
-        <Stat label="Expected Closing" value={formatINR(agg.closing_cash_expected)} accent="font-semibold"/>
+        <Stat label="Expected Closing" value={formatINR(agg.closing_cash_expected)} accent="font-semibold" onClick={()=>drill('closing_cash_expected')}/>
       </div>
-
       {bd?.status==='OPEN' && (
         <Card><CardHeader><CardTitle>Opening Cash</CardTitle></CardHeader>
           <CardContent className="flex gap-3 items-end">
@@ -576,21 +970,20 @@ function CloseView({ centre, role, bump }) {
           </CardContent>
         </Card>
       )}
-
       <Card>
         <CardHeader><CardTitle>Closing Verification</CardTitle></CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Row k="Opening Cash" v={formatINR(agg.opening_cash)} />
-            <Row k="+ Cash Sales" v={formatINR(agg.cash_sales)} />
-            <Row k="+ Transfer In" v={formatINR(agg.cash_transfer_in)} />
-            <Row k="+ Float Added" v={formatINR(agg.float_added)} />
-            <Row k="− Cash Expenses" v={formatINR(agg.cash_expenses)} />
-            <Row k="− Deposits" v={formatINR(agg.cash_deposited)} />
-            <Row k="− Withdrawals" v={formatINR(agg.cash_withdrawn)} />
-            <Row k="− Transfer Out" v={formatINR(agg.cash_transfer_out)} />
+            <Row k="+ Cash Sales" v={formatINR(agg.cash_sales)} onClick={()=>drill('cash_sales')}/>
+            <Row k="+ Transfer In" v={formatINR(agg.cash_transfer_in)} onClick={()=>drill('cash_transfer_in')}/>
+            <Row k="+ Float Added" v={formatINR(agg.float_added)} onClick={()=>drill('float_added')}/>
+            <Row k="− Cash Expenses" v={formatINR(agg.cash_expenses)} onClick={()=>drill('cash_expenses')}/>
+            <Row k="− Deposits" v={formatINR(agg.cash_deposited)} onClick={()=>drill('cash_deposited')}/>
+            <Row k="− Withdrawals" v={formatINR(agg.cash_withdrawn)} onClick={()=>drill('cash_withdrawn')}/>
+            <Row k="− Transfer Out" v={formatINR(agg.cash_transfer_out)} onClick={()=>drill('cash_transfer_out')}/>
             <div className="border-t border-border/50 col-span-2"></div>
-            <Row k="Expected Closing Cash" v={formatINR(agg.closing_cash_expected)} bold />
+            <Row k="Expected Closing Cash" v={formatINR(agg.closing_cash_expected)} bold onClick={()=>drill('closing_cash_expected')}/>
           </div>
           {bd?.status==='OPEN' ? (
             <div className="grid grid-cols-2 gap-3 pt-2">
@@ -614,24 +1007,26 @@ function CloseView({ centre, role, bump }) {
   )
 }
 
-// ---------- AUDIT ----------
-function AuditView() {
+// ============================================================================
+// AUDIT LOG (with links to events)
+// ============================================================================
+function AuditView({ onDrill, refreshTick }) {
   const [log, setLog] = useState([])
-  useEffect(()=>{ apiGet('/audit-log').then(setLog) },[])
+  useEffect(()=>{ apiGet('/audit-log').then(setLog) },[refreshTick])
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Audit Log</h2>
-      <p className="text-sm text-muted-foreground">Immutable history of sensitive actions.</p>
+      <p className="text-sm text-muted-foreground">Immutable history. Click any row with an event to open its detail.</p>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>Role</TableHead><TableHead>Centre</TableHead><TableHead>Details</TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>Role</TableHead><TableHead>Details</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
             {log.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No audit entries yet</TableCell></TableRow>}
-            {log.map(l=>(<TableRow key={l.id}>
+            {log.map(l=>(<TableRow key={l.id} className={l.target_event_id?'cursor-pointer hover:bg-muted/50':''} onClick={()=>l.target_event_id && onDrill({type:'event', eventId:l.target_event_id})}>
               <TableCell className="text-xs">{new Date(l.created_at).toLocaleString('en-IN')}</TableCell>
-              <TableCell><Badge>{l.action}</Badge></TableCell>
+              <TableCell><Badge variant={l.action==='REVERSE_EVENT'?'destructive':'default'}>{l.action}</Badge></TableCell>
               <TableCell>{l.actor}</TableCell><TableCell>{l.role}</TableCell>
-              <TableCell className="font-mono text-xs">{l.centre_id?.slice(0,8)}</TableCell>
-              <TableCell className="text-xs text-muted-foreground">{JSON.stringify(l.new_value)} {l.reason?`— ${l.reason}`:''}</TableCell>
+              <TableCell className="text-xs text-muted-foreground">{l.reason || JSON.stringify(l.new_value||{})}</TableCell>
+              <TableCell>{l.target_event_id && <ChevronRight className="h-4 w-4 text-muted-foreground"/>}</TableCell>
             </TableRow>))}
           </TableBody></Table>
       </CardContent></Card>
@@ -639,26 +1034,31 @@ function AuditView() {
   )
 }
 
-// ---------- SHELL ----------
+// ============================================================================
+// SHELL
+// ============================================================================
 function App() {
   const [centres, setCentres] = useState([])
   const [centre, setCentre] = useState(null)
   const [role, setRole] = useState('RECEPTION')
   const [view, setView] = useState('dashboard')
   const [bump, setBump] = useState(0)
+  const [drillCtx, setDrillCtx] = useState(null)
 
   useEffect(() => { apiGet('/centres').then(list => { setCentres(list); setCentre(list[0]) }) }, [])
+  DrillContext.open = (ctx) => setDrillCtx(ctx)
+  DrillContext.close = () => setDrillCtx(null)
+  const onDrill = (ctx) => setDrillCtx(ctx)
 
   if (!centre) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading centres…</div>
 
   const Icon = NAV.find(n=>n.id===view)?.icon || LayoutDashboard
-  const props = { centre, centres, role, bump: () => setBump(b=>b+1), refreshTick: bump }
+  const props = { centre, centres, role, bump: () => setBump(b=>b+1), refreshTick: bump, onDrill }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted/20">
       <Toaster theme="dark" position="top-right" richColors />
       <div className="flex">
-        {/* Sidebar */}
         <aside className="w-64 h-screen sticky top-0 border-r border-border/50 bg-card/40 backdrop-blur p-4 flex flex-col">
           <div className="flex items-center gap-2 px-2 py-3">
             <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center">
@@ -669,7 +1069,6 @@ function App() {
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Business OS</div>
             </div>
           </div>
-
           <div className="mt-4 space-y-1">
             <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Centre</Label>
             <Select value={centre.id} onValueChange={v=>setCentre(centres.find(c=>c.id===v))}>
@@ -677,7 +1076,6 @@ function App() {
               <SelectContent>{centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="h-3 w-3 inline mr-1"/>{c.name}</SelectItem>)}</SelectContent>
             </Select>
           </div>
-
           <div className="mt-3 space-y-1">
             <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Role</Label>
             <Select value={role} onValueChange={setRole}>
@@ -685,7 +1083,6 @@ function App() {
               <SelectContent>{ROLES.map(r=><SelectItem key={r.id} value={r.id}>{r.label}</SelectItem>)}</SelectContent>
             </Select>
           </div>
-
           <nav className="mt-6 flex-1 space-y-1">
             {NAV.map(n => {
               const active = view === n.id
@@ -699,11 +1096,9 @@ function App() {
               )
             })}
           </nav>
-
           <div className="text-[10px] text-muted-foreground px-2 py-3 border-t border-border/50">One transaction • One source • Infinite reports</div>
         </aside>
 
-        {/* Main */}
         <main className="flex-1 p-8 max-w-[1600px]">
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
             <Icon className="h-4 w-4"/> <span>{NAV.find(n=>n.id===view)?.label}</span>
@@ -723,6 +1118,8 @@ function App() {
           {view==='audit'      && <AuditView {...props} />}
         </main>
       </div>
+
+      <DrillDownDialog ctx={drillCtx} role={role} bump={() => setBump(b=>b+1)} />
     </div>
   )
 }

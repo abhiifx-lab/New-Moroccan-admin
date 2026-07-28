@@ -1,647 +1,754 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend Test for Spa ERP
-Tests the complete end-to-end scenario with financial engine verification
+Backend API Test Suite for Spa ERP - Audit & Investigation Module
+Tests the newly-added endpoints:
+1. GET /events/:id - enriched event detail
+2. GET /drill-down - metric drill-down with breakdown
+3. POST /events/:id/reverse - immutable reversal with semantic rules
 """
 
 import requests
 import json
 from datetime import datetime
 
-# Load BASE_URL from .env
+# Base URL from .env: NEXT_PUBLIC_BASE_URL + /api
 BASE_URL = "https://multi-centre-spa-ops.preview.emergentagent.com/api"
 
-def log_test(name, passed, details=""):
-    status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"\n{status}: {name}")
-    if details:
-        print(f"  {details}")
-    return passed
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
-def test_centres_and_services():
-    """Test 1: Fetch centres and services"""
-    print("\n" + "="*80)
-    print("TEST 1: Centres & Services")
-    print("="*80)
+def test_audit_investigation_module():
+    """
+    End-to-end test scenario for Audit & Investigation module.
+    Uses business_date = "2030-01-15" to isolate from prior tests.
+    """
+    log("=" * 80)
+    log("AUDIT & INVESTIGATION MODULE - COMPREHENSIVE TEST")
+    log("=" * 80)
     
-    try:
-        # Get centres
-        resp = requests.get(f"{BASE_URL}/centres")
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
-        centres = resp.json()
-        assert len(centres) >= 4, f"Expected at least 4 centres, got {len(centres)}"
-        
-        centre_names = [c['name'] for c in centres]
-        log_test("Centres fetched", True, f"Found {len(centres)} centres: {', '.join(centre_names)}")
-        
-        # Get services
-        resp = requests.get(f"{BASE_URL}/services")
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
-        services = resp.json()
-        assert len(services) >= 5, f"Expected at least 5 services, got {len(services)}"
-        
-        log_test("Services fetched", True, f"Found {len(services)} services")
-        
-        return centres[0]  # Return first centre for subsequent tests
-        
-    except Exception as e:
-        log_test("Centres & Services", False, str(e))
-        raise
-
-def test_end_to_end_scenario(centre):
-    """Test 2-11: Complete end-to-end scenario"""
-    print("\n" + "="*80)
-    print("TEST 2-11: End-to-End Financial Scenario")
-    print("="*80)
-    
+    # Get first centre
+    log("\n[SETUP] Fetching centres...")
+    resp = requests.get(f"{BASE_URL}/centres")
+    assert resp.status_code == 200, f"Failed to get centres: {resp.status_code}"
+    centres = resp.json()
+    assert len(centres) > 0, "No centres found"
+    centre = centres[0]
     centre_id = centre['id']
-    print(f"\nUsing Centre: {centre['name']} (ID: {centre_id})")
+    log(f"✓ Using centre: {centre['name']} (ID: {centre_id})")
     
-    # Get today's date from the API's perspective
-    resp = requests.get(f"{BASE_URL}/business-day?centre_id={centre_id}")
-    assert resp.status_code == 200
-    bd = resp.json()
-    today = bd['business_date']
-    print(f"Business Date: {today}")
+    # Test date - isolated from prior tests
+    test_date = "2030-01-15"
+    log(f"✓ Test date: {test_date}")
     
-    try:
-        # Step 2: Set opening cash = 500000 paise (₹5000)
-        print("\n--- Step 2: Set Opening Cash ---")
-        resp = requests.post(f"{BASE_URL}/business-day/set-opening", json={
-            "centre_id": centre_id,
-            "opening_cash": 500000
-        })
-        assert resp.status_code == 200, f"Set opening failed: {resp.status_code}"
-        log_test("Set opening cash to 500000 paise", True)
-        
-        # Step 3a: Booking CASH 350000 (customer A)
-        print("\n--- Step 3a: Booking CASH 350000 ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Arjun Mehta",
-            "therapist": "Priya",
-            "service_name": "Signature Massage",
-            "amount": 350000,
-            "payment_method": "CASH"
-        })
-        assert resp.status_code == 200, f"Booking A failed: {resp.status_code}"
-        log_test("Booking A (CASH 350000)", True)
-        
-        # Step 3b: Booking UPI 400000 (customer B)
-        print("\n--- Step 3b: Booking UPI 400000 ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Bhavna Singh",
-            "therapist": "Ravi",
-            "service_name": "Aromatherapy",
-            "amount": 400000,
-            "payment_method": "UPI"
-        })
-        assert resp.status_code == 200, f"Booking B failed: {resp.status_code}"
-        log_test("Booking B (UPI 400000)", True)
-        
-        # Step 3c: Booking MIXED 350000 (cash 100000, upi 200000, card 50000) (customer C)
-        print("\n--- Step 3c: Booking MIXED 350000 ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Chitra Desai",
-            "therapist": "Anjali",
-            "service_name": "Deep Tissue",
-            "amount": 350000,
-            "payment_method": "MIXED",
-            "payment_breakdown": {
-                "cash": 100000,
-                "upi": 200000,
-                "card": 50000
-            }
-        })
-        assert resp.status_code == 200, f"Booking C failed: {resp.status_code}"
-        log_test("Booking C (MIXED 350000)", True)
-        
-        # Step 4: Sell membership 1000000 CASH (customer D)
-        print("\n--- Step 4: Sell Membership 1000000 ---")
-        resp = requests.post(f"{BASE_URL}/events/membership", json={
-            "centre_id": centre_id,
-            "customer": "Deepak Kumar",
-            "phone": "9876543210",
-            "amount": 1000000,
-            "payment_method": "CASH"
-        })
-        assert resp.status_code == 200, f"Membership sale failed: {resp.status_code}"
-        membership_data = resp.json()
-        membership_code = membership_data['membership']['code']
-        log_test("Membership sold (1000000 CASH)", True, f"Code: {membership_code}")
-        
-        # Step 5: Sell gift card 500000 CASH (customer E to recipient F)
-        print("\n--- Step 5: Sell Gift Card 500000 ---")
-        resp = requests.post(f"{BASE_URL}/events/gift-card", json={
-            "centre_id": centre_id,
-            "customer": "Esha Patel",
-            "recipient": "Farhan Ali",
-            "amount": 500000,
-            "payment_method": "CASH"
-        })
-        assert resp.status_code == 200, f"Gift card sale failed: {resp.status_code}"
-        gc_data = resp.json()
-        gc_code = gc_data['gift_card']['code']
-        log_test("Gift card sold (500000 CASH)", True, f"Code: {gc_code}")
-        
-        # Step 6: Redeem membership 200000 (customer D)
-        print("\n--- Step 6: Redeem Membership 200000 ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Deepak Kumar",
-            "therapist": "Priya",
-            "service_name": "Couple Ritual",
-            "amount": 200000,
-            "payment_method": "MEMBERSHIP",
-            "redemption_ref": membership_code
-        })
-        assert resp.status_code == 200, f"Membership redemption failed: {resp.status_code}"
-        log_test("Membership redeemed (200000)", True)
-        
-        # Step 7: Redeem gift card 150000 (customer F)
-        print("\n--- Step 7: Redeem Gift Card 150000 ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Farhan Ali",
-            "therapist": "Ravi",
-            "service_name": "Facial Glow",
-            "amount": 150000,
-            "payment_method": "GIFT_CARD",
-            "redemption_ref": gc_code
-        })
-        assert resp.status_code == 200, f"Gift card redemption failed: {resp.status_code}"
-        log_test("Gift card redeemed (150000)", True)
-        
-        # Step 8: Expense CASH 50000
-        print("\n--- Step 8: Expense CASH 50000 ---")
-        resp = requests.post(f"{BASE_URL}/events/expense", json={
-            "centre_id": centre_id,
-            "amount": 50000,
-            "payment_method": "CASH",
-            "category": "Utilities"
-        })
-        assert resp.status_code == 200, f"Expense CASH failed: {resp.status_code}"
-        log_test("Expense CASH 50000", True)
-        
-        # Step 9: Expense UPI 30000
-        print("\n--- Step 9: Expense UPI 30000 ---")
-        resp = requests.post(f"{BASE_URL}/events/expense", json={
-            "centre_id": centre_id,
-            "amount": 30000,
-            "payment_method": "UPI",
-            "category": "Supplies"
-        })
-        assert resp.status_code == 200, f"Expense UPI failed: {resp.status_code}"
-        log_test("Expense UPI 30000", True)
-        
-        # Step 10: Cash movement BANK_DEPOSIT 200000
-        print("\n--- Step 10: Cash Movement BANK_DEPOSIT 200000 ---")
-        resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
-            "centre_id": centre_id,
-            "amount": 200000,
-            "movement_type": "BANK_DEPOSIT"
-        })
-        assert resp.status_code == 200, f"BANK_DEPOSIT failed: {resp.status_code}"
-        log_test("BANK_DEPOSIT 200000", True)
-        
-        # Step 11: Cash movement FLOAT_ADDED 100000
-        print("\n--- Step 11: Cash Movement FLOAT_ADDED 100000 ---")
-        resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
-            "centre_id": centre_id,
-            "amount": 100000,
-            "movement_type": "FLOAT_ADDED"
-        })
-        assert resp.status_code == 200, f"FLOAT_ADDED failed: {resp.status_code}"
-        log_test("FLOAT_ADDED 100000", True)
-        
-        return centre_id, today, membership_code, gc_code
-        
-    except Exception as e:
-        log_test("End-to-end scenario", False, str(e))
-        raise
-
-def test_dashboard_verification(centre_id, today):
-    """Test 12: Verify Dashboard Calculations"""
-    print("\n" + "="*80)
-    print("TEST 12: Dashboard Verification")
-    print("="*80)
+    # Store event IDs for later reference
+    event_ids = {}
+    membership_code = None
+    gift_card_code = None
     
-    try:
-        resp = requests.get(f"{BASE_URL}/dashboard?centre_id={centre_id}&date={today}")
-        assert resp.status_code == 200, f"Dashboard fetch failed: {resp.status_code}"
+    # ========================================================================
+    # STEP A: SEED EVENTS
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP A: SEED EVENTS ON 2030-01-15")
+    log("=" * 80)
+    
+    # A1. Set opening cash
+    log("\n[A1] Setting opening cash to 500000...")
+    resp = requests.post(f"{BASE_URL}/business-day/set-opening", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "opening_cash": 500000
+    })
+    assert resp.status_code == 200, f"Failed to set opening cash: {resp.status_code} - {resp.text}"
+    log("✓ Opening cash set to 500000")
+    
+    # A2. Booking CASH 350000
+    log("\n[A2] Creating CASH booking 350000 for Alpha...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Alpha",
+        "amount": 350000,
+        "payment_method": "CASH",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
+    event_ids['A2_cash_booking'] = resp.json()['id']
+    log(f"✓ CASH booking created: {event_ids['A2_cash_booking']}")
+    
+    # A3. Booking UPI 400000
+    log("\n[A3] Creating UPI booking 400000 for Bravo...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Bravo",
+        "amount": 400000,
+        "payment_method": "UPI",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
+    event_ids['A3_upi_booking'] = resp.json()['id']
+    log(f"✓ UPI booking created: {event_ids['A3_upi_booking']}")
+    
+    # A4. Booking MIXED 350000
+    log("\n[A4] Creating MIXED booking 350000 for Charlie...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Charlie",
+        "amount": 350000,
+        "payment_method": "MIXED",
+        "payment_breakdown": {"cash": 100000, "upi": 200000, "card": 50000},
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create booking: {resp.status_code} - {resp.text}"
+    event_ids['A4_mixed_booking'] = resp.json()['id']
+    log(f"✓ MIXED booking created: {event_ids['A4_mixed_booking']}")
+    
+    # A5. Sell membership 1000000 CASH to Delta
+    log("\n[A5] Selling membership 1000000 CASH to Delta...")
+    resp = requests.post(f"{BASE_URL}/events/membership", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Delta",
+        "amount": 1000000,
+        "payment_method": "CASH",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create membership: {resp.status_code} - {resp.text}"
+    data = resp.json()
+    event_ids['A5_membership_sale'] = data['event']['id']
+    membership_code = data['membership']['code']
+    log(f"✓ Membership sale created: {event_ids['A5_membership_sale']}, code: {membership_code}")
+    
+    # A6. Sell gift card 500000 CASH from Echo to Foxtrot
+    log("\n[A6] Selling gift card 500000 CASH from Echo to Foxtrot...")
+    resp = requests.post(f"{BASE_URL}/events/gift-card", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Echo",
+        "recipient": "Foxtrot",
+        "amount": 500000,
+        "payment_method": "CASH",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create gift card: {resp.status_code} - {resp.text}"
+    data = resp.json()
+    event_ids['A6_gift_card_sale'] = data['event']['id']
+    gift_card_code = data['gift_card']['code']
+    log(f"✓ Gift card sale created: {event_ids['A6_gift_card_sale']}, code: {gift_card_code}")
+    
+    # A7. Booking 200000 MEMBERSHIP redeem using M1
+    log("\n[A7] Creating MEMBERSHIP redemption booking 200000 for Delta...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Delta",
+        "amount": 200000,
+        "payment_method": "MEMBERSHIP",
+        "redemption_ref": membership_code,
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create membership redemption: {resp.status_code} - {resp.text}"
+    event_ids['A7_membership_redemption'] = resp.json()['id']
+    log(f"✓ Membership redemption created: {event_ids['A7_membership_redemption']}")
+    
+    # A8. Booking 150000 GIFT_CARD redeem using G1
+    log("\n[A8] Creating GIFT_CARD redemption booking 150000 for Foxtrot...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Foxtrot",
+        "amount": 150000,
+        "payment_method": "GIFT_CARD",
+        "redemption_ref": gift_card_code,
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create gift card redemption: {resp.status_code} - {resp.text}"
+    event_ids['A8_gift_card_redemption'] = resp.json()['id']
+    log(f"✓ Gift card redemption created: {event_ids['A8_gift_card_redemption']}")
+    
+    # A9. Expense CASH 50000
+    log("\n[A9] Creating CASH expense 50000 for Utilities...")
+    resp = requests.post(f"{BASE_URL}/events/expense", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "amount": 50000,
+        "payment_method": "CASH",
+        "category": "Utilities",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create expense: {resp.status_code} - {resp.text}"
+    event_ids['A9_expense'] = resp.json()['id']
+    log(f"✓ Expense created: {event_ids['A9_expense']}")
+    
+    # A10. Cash movement BANK_DEPOSIT 200000
+    log("\n[A10] Creating BANK_DEPOSIT 200000...")
+    resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "amount": 200000,
+        "movement_type": "BANK_DEPOSIT",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create cash movement: {resp.status_code} - {resp.text}"
+    event_ids['A10_bank_deposit'] = resp.json()['id']
+    log(f"✓ Bank deposit created: {event_ids['A10_bank_deposit']}")
+    
+    # A11. Cash movement FLOAT_ADDED 100000
+    log("\n[A11] Creating FLOAT_ADDED 100000...")
+    resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "amount": 100000,
+        "movement_type": "FLOAT_ADDED",
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to create cash movement: {resp.status_code} - {resp.text}"
+    event_ids['A11_float_added'] = resp.json()['id']
+    log(f"✓ Float added created: {event_ids['A11_float_added']}")
+    
+    log("\n✓ STEP A COMPLETE: All 11 events seeded successfully")
+    
+    # ========================================================================
+    # STEP B: BASELINE VERIFICATION
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP B: BASELINE VERIFICATION (BEFORE REVERSALS)")
+    log("=" * 80)
+    
+    log("\n[B] Fetching dashboard for baseline verification...")
+    resp = requests.get(f"{BASE_URL}/dashboard", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
+    dashboard = resp.json()['agg']
+    
+    # Expected values
+    expected = {
+        "total_revenue": 2600000,  # 1100000 + 1000000 + 500000
+        "booking_sales": 1100000,  # 350000 + 400000 + 350000
+        "membership_sales": 1000000,
+        "gift_card_sales": 500000,
+        "cash_sales": 1950000,  # 350000 + 100000 + 1000000 + 500000
+        "upi_sales": 600000,  # 400000 + 200000
+        "card_sales": 50000,
+        "total_expenses": 50000,
+        "cash_expenses": 50000,
+        "cash_deposited": 200000,
+        "float_added": 100000,
+        "bookings": 5,
+        "redemptions": 2,
+        "guests": 6,  # Alpha, Bravo, Charlie, Delta, Echo, Foxtrot
+        "closing_cash_expected": 2300000  # 500000 + 1950000 + 100000 - 50000 - 200000
+    }
+    
+    log("\nVerifying dashboard metrics:")
+    all_passed = True
+    for key, expected_val in expected.items():
+        actual_val = dashboard.get(key, 0)
+        status = "✓" if actual_val == expected_val else "✗"
+        if actual_val != expected_val:
+            all_passed = False
+            log(f"  {status} {key}: expected {expected_val}, got {actual_val} ❌")
+        else:
+            log(f"  {status} {key}: {actual_val}")
+    
+    assert all_passed, "❌ BASELINE VERIFICATION FAILED - Dashboard metrics don't match expected values"
+    log("\n✓ STEP B COMPLETE: All baseline metrics verified")
+    
+    # ========================================================================
+    # STEP C: DRILL-DOWN VALIDATION
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP C: DRILL-DOWN VALIDATION FOR ALL METRICS")
+    log("=" * 80)
+    
+    metrics_to_test = [
+        "total_revenue", "booking_sales", "membership_sales", "gift_card_sales",
+        "cash_sales", "upi_sales", "card_sales", "total_expenses", "cash_expenses",
+        "cash_deposited", "float_added", "bookings", "redemptions",
+        "memberships_sold", "gift_cards_sold", "guests", "net_profit"
+    ]
+    
+    drill_down_results = {}
+    for metric in metrics_to_test:
+        log(f"\n[C] Testing drill-down for metric: {metric}")
+        resp = requests.get(f"{BASE_URL}/drill-down", params={
+            "metric": metric,
+            "centre_id": centre_id,
+            "date": test_date
+        })
+        assert resp.status_code == 200, f"Failed to get drill-down for {metric}: {resp.status_code} - {resp.text}"
         data = resp.json()
-        agg = data['agg']
+        drill_down_results[metric] = data
         
-        print("\n--- Expected vs Actual ---")
+        # Verify total matches dashboard (except for metrics not in dashboard)
+        if metric in expected:
+            dashboard_val = expected[metric]
+            drill_total = data['total']
+            if drill_total == dashboard_val:
+                log(f"  ✓ Total matches dashboard: {drill_total}")
+            else:
+                log(f"  ✗ Total mismatch: drill-down={drill_total}, dashboard={dashboard_val} ❌")
+                assert False, f"Drill-down total mismatch for {metric}"
         
-        # Expected values
-        expected = {
-            'total_revenue': 2600000,  # 350000 + 400000 + 350000 + 1000000 + 500000
-            'booking_sales': 1100000,  # 350000 + 400000 + 350000
-            'membership_sales': 1000000,
-            'gift_card_sales': 500000,
-            'cash_sales': 1950000,  # 350000 + 100000 + 1000000 + 500000
-            'upi_sales': 600000,  # 400000 + 200000
-            'card_sales': 50000,
-            'total_expenses': 80000,  # 50000 + 30000
-            'cash_expenses': 50000,
-            'upi_expenses': 30000,
-            'cash_deposited': 200000,
-            'float_added': 100000,
-            'redemptions': 2,
-            'bookings': 5,  # 3 paid + 2 redeemed
-            'memberships_sold': 1,
-            'gift_cards_sold': 1,
-            'closing_cash_expected': 2300000,  # 500000 + 1950000 + 100000 - 50000 - 200000
-            'guests': 6  # A, B, C, D, E, F
-        }
+        # Verify events contributions sum to total
+        events_sum = sum(e['contribution'] for e in data['events'])
+        if events_sum == data['total']:
+            log(f"  ✓ Events contributions sum to total: {events_sum}")
+        else:
+            log(f"  ✗ Events sum mismatch: sum={events_sum}, total={data['total']} ❌")
+            assert False, f"Events contributions don't sum to total for {metric}"
         
-        all_passed = True
-        for key, exp_val in expected.items():
-            act_val = agg.get(key, 0)
-            passed = act_val == exp_val
-            all_passed = all_passed and passed
-            status = "✅" if passed else "❌"
-            print(f"{status} {key}: Expected {exp_val}, Got {act_val}")
-        
-        log_test("Dashboard calculations", all_passed)
-        return all_passed
-        
-    except Exception as e:
-        log_test("Dashboard verification", False, str(e))
-        raise
-
-def test_memberships_and_gift_cards(membership_code, gc_code):
-    """Test 13: Verify Membership and Gift Card Balances"""
-    print("\n" + "="*80)
-    print("TEST 13: Membership & Gift Card Balances")
-    print("="*80)
+        # Verify breakdown by type
+        breakdown = data.get('breakdown', {})
+        breakdown_total = sum(b['total'] for b in breakdown.values())
+        log(f"  ✓ Breakdown by type: {len(breakdown)} types, total={breakdown_total}")
+        log(f"  ✓ Events count: {len(data['events'])}")
     
-    try:
-        # Check membership balance
-        resp = requests.get(f"{BASE_URL}/memberships")
-        assert resp.status_code == 200
-        memberships = resp.json()
-        membership = next((m for m in memberships if m['code'] == membership_code), None)
-        assert membership is not None, f"Membership {membership_code} not found"
-        
-        expected_remaining = 800000  # 1000000 - 200000
-        actual_remaining = membership['remaining_paise']
-        passed_m = actual_remaining == expected_remaining
-        log_test("Membership balance", passed_m, 
-                f"Expected {expected_remaining}, Got {actual_remaining}")
-        
-        # Check gift card balance
-        resp = requests.get(f"{BASE_URL}/gift-cards")
-        assert resp.status_code == 200
-        gift_cards = resp.json()
-        gc = next((g for g in gift_cards if g['code'] == gc_code), None)
-        assert gc is not None, f"Gift card {gc_code} not found"
-        
-        expected_remaining_gc = 350000  # 500000 - 150000
-        actual_remaining_gc = gc['remaining_paise']
-        passed_gc = actual_remaining_gc == expected_remaining_gc
-        log_test("Gift card balance", passed_gc,
-                f"Expected {expected_remaining_gc}, Got {actual_remaining_gc}")
-        
-        return passed_m and passed_gc
-        
-    except Exception as e:
-        log_test("Memberships & Gift Cards", False, str(e))
-        raise
-
-def test_master_register(centre_id, today):
-    """Test 14: Verify Master Register"""
-    print("\n" + "="*80)
-    print("TEST 14: Master Register")
-    print("="*80)
+    log("\n✓ STEP C COMPLETE: All drill-down validations passed")
     
-    try:
-        resp = requests.get(f"{BASE_URL}/master-register?centre_id={centre_id}&from={today}&to={today}")
-        assert resp.status_code == 200, f"Master register fetch failed: {resp.status_code}"
-        data = resp.json()
-        rows = data['rows']
-        
-        assert len(rows) == 1, f"Expected 1 row, got {len(rows)}"
-        row = rows[0]
-        
-        # Verify key fields match dashboard
-        expected = {
-            'total_revenue': 2600000,
-            'booking_sales': 1100000,
-            'cash_sales': 1950000,
-            'closing_cash_expected': 2300000
-        }
-        
-        all_passed = True
-        for key, exp_val in expected.items():
-            act_val = row.get(key, 0)
-            passed = act_val == exp_val
-            all_passed = all_passed and passed
-            status = "✅" if passed else "❌"
-            print(f"{status} {key}: Expected {exp_val}, Got {act_val}")
-        
-        log_test("Master register row", all_passed)
-        return all_passed
-        
-    except Exception as e:
-        log_test("Master register", False, str(e))
-        raise
-
-def test_cash_book(centre_id, today):
-    """Test 15: Verify Cash Book"""
-    print("\n" + "="*80)
-    print("TEST 15: Cash Book")
-    print("="*80)
+    # ========================================================================
+    # STEP D: ENRICHED EVENT DETAIL
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP D: ENRICHED EVENT DETAIL")
+    log("=" * 80)
     
-    try:
-        resp = requests.get(f"{BASE_URL}/cash-book?centre_id={centre_id}&date={today}")
-        assert resp.status_code == 200, f"Cash book fetch failed: {resp.status_code}"
-        data = resp.json()
-        lines = data['lines']
-        agg = data['agg']
-        
-        # Check opening line
-        opening_line = lines[0]
-        assert opening_line['ref'] == 'OPENING', "First line should be OPENING"
-        assert opening_line['running'] == 500000, f"Opening should be 500000, got {opening_line['running']}"
-        log_test("Cash book opening", True, f"Opening: {opening_line['running']}")
-        
-        # Check final running balance
-        last_line = lines[-1]
-        expected_final = 2300000
-        actual_final = last_line['running']
-        passed_final = actual_final == expected_final
-        log_test("Cash book final balance", passed_final,
-                f"Expected {expected_final}, Got {actual_final}")
-        
-        # Check aggregate closing_cash_expected
-        passed_agg = agg['closing_cash_expected'] == expected_final
-        log_test("Cash book aggregate", passed_agg,
-                f"Expected {expected_final}, Got {agg['closing_cash_expected']}")
-        
-        return passed_final and passed_agg
-        
-    except Exception as e:
-        log_test("Cash book", False, str(e))
-        raise
-
-def test_business_day_close_reopen(centre_id, today):
-    """Test 16: Business Day Close and Reopen"""
-    print("\n" + "="*80)
-    print("TEST 16: Business Day Close & Reopen")
-    print("="*80)
+    # D1. Test CASH booking A2
+    log(f"\n[D1] Testing enriched detail for CASH booking A2...")
+    resp = requests.get(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}")
+    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
+    event_detail = resp.json()
     
-    try:
-        # Close the day with declared cash = 2295000 (variance = -5000)
-        print("\n--- Close Business Day ---")
-        resp = requests.post(f"{BASE_URL}/business-day/close", json={
-            "centre_id": centre_id,
-            "closing_cash_declared": 2295000,
-            "actor": "reception",
-            "role": "RECEPTION"
-        })
-        assert resp.status_code == 200, f"Close day failed: {resp.status_code}"
-        close_data = resp.json()
-        
-        expected_val = 2300000
-        declared_val = 2295000
-        variance_val = -5000
-        
-        passed_close = (
-            close_data['expected'] == expected_val and
-            close_data['declared'] == declared_val and
-            close_data['variance'] == variance_val
-        )
-        log_test("Business day closed", passed_close,
-                f"Expected: {expected_val}, Declared: {declared_val}, Variance: {variance_val}")
-        
-        # Verify status is CLOSED
-        resp = requests.get(f"{BASE_URL}/business-day?centre_id={centre_id}&date={today}")
-        assert resp.status_code == 200
-        bd = resp.json()
-        assert bd['status'] == 'CLOSED', f"Expected CLOSED, got {bd['status']}"
-        log_test("Business day status CLOSED", True)
-        
-        # Try to create a booking (should fail)
-        print("\n--- Try Booking on Closed Day ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Test User",
-            "amount": 100000,
-            "payment_method": "CASH"
-        })
-        passed_blocked = resp.status_code == 400
-        error_msg = resp.json().get('error', '')
-        log_test("Booking blocked on closed day", passed_blocked, f"Error: {error_msg}")
-        
-        # Try to reopen with RECEPTION role (should fail)
-        print("\n--- Try Reopen with RECEPTION (should fail) ---")
-        resp = requests.post(f"{BASE_URL}/business-day/reopen", json={
-            "centre_id": centre_id,
-            "business_date": today,
-            "actor": "reception",
-            "role": "RECEPTION",
-            "reason": "Test reopen"
-        })
-        passed_forbidden = resp.status_code == 403
-        log_test("Reopen blocked for RECEPTION", passed_forbidden)
-        
-        # Reopen with MANAGER role (should succeed)
-        print("\n--- Reopen with MANAGER ---")
-        resp = requests.post(f"{BASE_URL}/business-day/reopen", json={
-            "centre_id": centre_id,
-            "business_date": today,
-            "actor": "jane",
-            "role": "MANAGER",
-            "reason": "Correction needed"
-        })
-        assert resp.status_code == 200, f"Reopen failed: {resp.status_code}"
-        log_test("Reopen with MANAGER", True)
-        
-        # Verify status is OPEN
-        resp = requests.get(f"{BASE_URL}/business-day?centre_id={centre_id}&date={today}")
-        assert resp.status_code == 200
-        bd = resp.json()
-        assert bd['status'] == 'OPEN', f"Expected OPEN, got {bd['status']}"
-        log_test("Business day status OPEN", True)
-        
-        # Try booking again (should succeed)
-        print("\n--- Try Booking After Reopen ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Test User After Reopen",
-            "amount": 100000,
-            "payment_method": "CASH"
-        })
-        passed_allowed = resp.status_code == 200
-        log_test("Booking allowed after reopen", passed_allowed)
-        
-        return passed_close and passed_blocked and passed_forbidden and passed_allowed
-        
-    except Exception as e:
-        log_test("Business day close/reopen", False, str(e))
-        raise
-
-def test_audit_log():
-    """Test 17: Verify Audit Log"""
-    print("\n" + "="*80)
-    print("TEST 17: Audit Log")
-    print("="*80)
+    # Verify centre is included
+    assert 'centre' in event_detail, "Centre not included in event detail"
+    assert event_detail['centre']['name'] == centre['name'], "Centre name mismatch"
+    log(f"  ✓ Centre included: {event_detail['centre']['name']}")
     
-    try:
-        resp = requests.get(f"{BASE_URL}/audit-log")
-        assert resp.status_code == 200, f"Audit log fetch failed: {resp.status_code}"
-        audit_entries = resp.json()
-        
-        # Check for CLOSE_DAY and REOPEN_DAY entries
-        actions = [entry['action'] for entry in audit_entries]
-        has_close = 'CLOSE_DAY' in actions
-        has_reopen = 'REOPEN_DAY' in actions
-        
-        log_test("Audit log has CLOSE_DAY", has_close)
-        log_test("Audit log has REOPEN_DAY", has_reopen)
-        
-        return has_close and has_reopen
-        
-    except Exception as e:
-        log_test("Audit log", False, str(e))
-        raise
-
-def test_error_cases(centre_id):
-    """Test 18: Error Cases"""
-    print("\n" + "="*80)
-    print("TEST 18: Error Cases")
-    print("="*80)
+    # Verify audit_history
+    assert 'audit_history' in event_detail, "Audit history not included"
+    assert len(event_detail['audit_history']) > 0, "Audit history is empty"
+    assert any(a['action'] == 'CREATE_EVENT' for a in event_detail['audit_history']), "CREATE_EVENT not in audit history"
+    log(f"  ✓ Audit history included: {len(event_detail['audit_history'])} entries")
     
-    try:
-        # Test 1: Non-existent membership code
-        print("\n--- Test: Non-existent Membership ---")
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Test",
-            "amount": 100000,
-            "payment_method": "MEMBERSHIP",
-            "redemption_ref": "INVALID-CODE"
-        })
-        passed_1 = resp.status_code == 400
-        error_1 = resp.json().get('error', '')
-        log_test("Non-existent membership rejected", passed_1, f"Error: {error_1}")
-        
-        # Test 2: Insufficient membership balance
-        print("\n--- Test: Insufficient Membership Balance ---")
-        # First create a small membership
-        resp = requests.post(f"{BASE_URL}/events/membership", json={
-            "centre_id": centre_id,
-            "customer": "Small Member",
-            "amount": 50000,
-            "payment_method": "CASH"
-        })
-        assert resp.status_code == 200
-        small_code = resp.json()['membership']['code']
-        
-        # Try to redeem more than available
-        resp = requests.post(f"{BASE_URL}/events/booking", json={
-            "centre_id": centre_id,
-            "customer": "Small Member",
-            "amount": 100000,
-            "payment_method": "MEMBERSHIP",
-            "redemption_ref": small_code
-        })
-        passed_2 = resp.status_code == 400
-        error_2 = resp.json().get('error', '')
-        log_test("Insufficient membership balance rejected", passed_2, f"Error: {error_2}")
-        
-        # Test 3: Invalid movement_type
-        print("\n--- Test: Invalid Movement Type ---")
-        resp = requests.post(f"{BASE_URL}/events/cash-movement", json={
-            "centre_id": centre_id,
-            "amount": 100000,
-            "movement_type": "INVALID_TYPE"
-        })
-        passed_3 = resp.status_code == 400
-        error_3 = resp.json().get('error', '')
-        log_test("Invalid movement_type rejected", passed_3, f"Error: {error_3}")
-        
-        return passed_1 and passed_2 and passed_3
-        
-    except Exception as e:
-        log_test("Error cases", False, str(e))
-        raise
-
-def main():
-    print("\n" + "="*80)
-    print("SPA ERP BACKEND COMPREHENSIVE TEST SUITE")
-    print("="*80)
-    print(f"Base URL: {BASE_URL}")
-    print(f"Test Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # Verify ledger_impact
+    assert 'ledger_impact' in event_detail, "Ledger impact not included"
+    ledger = event_detail['ledger_impact']
+    assert ledger['revenue'] == 350000, f"Revenue mismatch: {ledger['revenue']}"
+    assert ledger['expense'] == 0, f"Expense should be 0: {ledger['expense']}"
+    assert ledger['cash'] == 350000, f"Cash mismatch: {ledger['cash']}"
+    assert ledger['upi'] == 0, f"UPI should be 0: {ledger['upi']}"
+    assert ledger['card'] == 0, f"Card should be 0: {ledger['card']}"
+    assert ledger['liability_delta'] == 0, f"Liability delta should be 0: {ledger['liability_delta']}"
+    log(f"  ✓ Ledger impact verified: revenue=350000, cash=350000")
     
-    results = []
+    # D2. Test MIXED booking A4
+    log(f"\n[D2] Testing enriched detail for MIXED booking A4...")
+    resp = requests.get(f"{BASE_URL}/events/{event_ids['A4_mixed_booking']}")
+    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
+    event_detail = resp.json()
+    ledger = event_detail['ledger_impact']
+    assert ledger['cash'] == 100000, f"Cash mismatch: {ledger['cash']}"
+    assert ledger['upi'] == 200000, f"UPI mismatch: {ledger['upi']}"
+    assert ledger['card'] == 50000, f"Card mismatch: {ledger['card']}"
+    assert ledger['revenue'] == 350000, f"Revenue mismatch: {ledger['revenue']}"
+    log(f"  ✓ MIXED booking ledger verified: cash=100000, upi=200000, card=50000, revenue=350000")
     
-    try:
-        # Test 1: Centres and Services
-        centre = test_centres_and_services()
-        results.append(("Centres & Services", True))
-        
-        # Test 2-11: End-to-end scenario
-        centre_id, today, membership_code, gc_code = test_end_to_end_scenario(centre)
-        results.append(("End-to-end scenario", True))
-        
-        # Test 12: Dashboard verification
-        passed_dashboard = test_dashboard_verification(centre_id, today)
-        results.append(("Dashboard verification", passed_dashboard))
-        
-        # Test 13: Memberships and gift cards
-        passed_liabilities = test_memberships_and_gift_cards(membership_code, gc_code)
-        results.append(("Memberships & Gift Cards", passed_liabilities))
-        
-        # Test 14: Master register
-        passed_register = test_master_register(centre_id, today)
-        results.append(("Master Register", passed_register))
-        
-        # Test 15: Cash book
-        passed_cashbook = test_cash_book(centre_id, today)
-        results.append(("Cash Book", passed_cashbook))
-        
-        # Test 16: Business day close/reopen
-        passed_bizday = test_business_day_close_reopen(centre_id, today)
-        results.append(("Business Day Close/Reopen", passed_bizday))
-        
-        # Test 17: Audit log
-        passed_audit = test_audit_log()
-        results.append(("Audit Log", passed_audit))
-        
-        # Test 18: Error cases
-        passed_errors = test_error_cases(centre_id)
-        results.append(("Error Cases", passed_errors))
-        
-    except Exception as e:
-        print(f"\n❌ CRITICAL ERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
+    # D3. Test MEMBERSHIP_SALE A5
+    log(f"\n[D3] Testing enriched detail for MEMBERSHIP_SALE A5...")
+    resp = requests.get(f"{BASE_URL}/events/{event_ids['A5_membership_sale']}")
+    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
+    event_detail = resp.json()
+    ledger = event_detail['ledger_impact']
+    assert ledger['liability_delta'] == 1000000, f"Liability delta mismatch: {ledger['liability_delta']}"
+    assert 'membership' in event_detail, "Membership not linked"
+    # After A7 redemption, remaining should be 800000
+    assert event_detail['membership']['remaining_paise'] == 800000, f"Membership balance mismatch: {event_detail['membership']['remaining_paise']}"
+    log(f"  ✓ Membership sale ledger verified: liability_delta=1000000, remaining=800000")
     
-    # Final summary
-    print("\n" + "="*80)
-    print("FINAL TEST SUMMARY")
-    print("="*80)
+    # D4. Test BOOKING with MEMBERSHIP redemption A7
+    log(f"\n[D4] Testing enriched detail for MEMBERSHIP redemption A7...")
+    resp = requests.get(f"{BASE_URL}/events/{event_ids['A7_membership_redemption']}")
+    assert resp.status_code == 200, f"Failed to get event detail: {resp.status_code} - {resp.text}"
+    event_detail = resp.json()
+    ledger = event_detail['ledger_impact']
+    assert ledger['revenue'] == 0, f"Revenue should be 0 for redemption: {ledger['revenue']}"
+    assert ledger['liability_delta'] == -200000, f"Liability delta mismatch: {ledger['liability_delta']}"
+    assert 'membership' in event_detail, "Membership not linked"
+    log(f"  ✓ Membership redemption ledger verified: revenue=0, liability_delta=-200000")
     
-    passed_count = sum(1 for _, passed in results if passed)
-    total_count = len(results)
+    log("\n✓ STEP D COMPLETE: All enriched event details verified")
     
-    for test_name, passed in results:
-        status = "✅ PASS" if passed else "❌ FAIL"
-        print(f"{status}: {test_name}")
+    # ========================================================================
+    # STEP E: REVERSE CASH BOOKING
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP E: REVERSE CASH BOOKING A2")
+    log("=" * 80)
     
-    print(f"\nTotal: {passed_count}/{total_count} tests passed")
+    # E1. Try to reverse without reason
+    log("\n[E1] Testing reversal without reason (should fail)...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={})
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
+    assert "reason" in resp.text.lower() and "mandatory" in resp.text.lower(), "Error message should mention mandatory reason"
+    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
     
-    if passed_count == total_count:
-        print("\n🎉 ALL TESTS PASSED! The financial engine is working correctly.")
-    else:
-        print(f"\n⚠️  {total_count - passed_count} test(s) failed. Review the details above.")
+    # E2. Reverse with reason
+    log("\n[E2] Reversing CASH booking A2 with reason...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={
+        "reason": "customer no-show",
+        "actor": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to reverse event: {resp.status_code} - {resp.text}"
+    reversal_data = resp.json()
+    assert 'reversal_event' in reversal_data, "Reversal event not returned"
+    reversal_event_id = reversal_data['reversal_event']['id']
+    log(f"  ✓ Reversal created: {reversal_event_id}")
     
-    print(f"\nTest Completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    # E3. Verify dashboard after reversal
+    log("\n[E3] Verifying dashboard after reversal...")
+    resp = requests.get(f"{BASE_URL}/dashboard", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
+    dashboard = resp.json()['agg']
+    
+    expected_after_e2 = {
+        "total_revenue": 2250000,  # 2600000 - 350000
+        "booking_sales": 750000,  # 1100000 - 350000
+        "cash_sales": 1600000,  # 1950000 - 350000
+        "closing_cash_expected": 1950000,  # 2300000 - 350000
+        "bookings": 4  # 5 - 1
+    }
+    
+    log("  Verifying metrics after reversal:")
+    for key, expected_val in expected_after_e2.items():
+        actual_val = dashboard.get(key, 0)
+        status = "✓" if actual_val == expected_val else "✗"
+        if actual_val != expected_val:
+            log(f"    {status} {key}: expected {expected_val}, got {actual_val} ❌")
+            assert False, f"Dashboard metric {key} mismatch after reversal"
+        else:
+            log(f"    {status} {key}: {actual_val}")
+    
+    # E4. Verify drill-down includes both original and reversal
+    log("\n[E4] Verifying drill-down includes original and reversal events...")
+    resp = requests.get(f"{BASE_URL}/drill-down", params={
+        "metric": "booking_sales",
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get drill-down: {resp.status_code} - {resp.text}"
+    drill_data = resp.json()
+    
+    # Find original and reversal in events
+    original_found = False
+    reversal_found = False
+    for item in drill_data['events']:
+        if item['event']['id'] == event_ids['A2_cash_booking']:
+            original_found = True
+            assert item['contribution'] == 350000, f"Original contribution should be 350000: {item['contribution']}"
+        if item['event']['id'] == reversal_event_id:
+            reversal_found = True
+            assert item['contribution'] == -350000, f"Reversal contribution should be -350000: {item['contribution']}"
+    
+    assert original_found, "Original event not found in drill-down"
+    assert reversal_found, "Reversal event not found in drill-down"
+    assert drill_data['total'] == 750000, f"Drill-down total should be 750000: {drill_data['total']}"
+    log(f"  ✓ Drill-down verified: total=750000, includes both original (+350000) and reversal (-350000)")
+    
+    # E5. Try to reverse the same event again
+    log("\n[E5] Testing double reversal (should fail)...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}/reverse", json={
+        "reason": "test double reversal",
+        "actor": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
+    assert "already reversed" in resp.text.lower(), "Error message should mention already reversed"
+    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
+    
+    # E6. Try to reverse the reversal event
+    log("\n[E6] Testing reversal of reversal event (should fail)...")
+    resp = requests.post(f"{BASE_URL}/events/{reversal_event_id}/reverse", json={
+        "reason": "test reversal of reversal",
+        "actor": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
+    assert "cannot reverse a reversal" in resp.text.lower(), "Error message should mention cannot reverse reversal"
+    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
+    
+    # E7. Verify audit log
+    log("\n[E7] Verifying audit log for reversal...")
+    resp = requests.get(f"{BASE_URL}/audit-log", params={
+        "target_event_id": event_ids['A2_cash_booking']
+    })
+    assert resp.status_code == 200, f"Failed to get audit log: {resp.status_code} - {resp.text}"
+    audit_entries = resp.json()
+    
+    reverse_entry = None
+    for entry in audit_entries:
+        if entry['action'] == 'REVERSE_EVENT':
+            reverse_entry = entry
+            break
+    
+    assert reverse_entry is not None, "REVERSE_EVENT entry not found in audit log"
+    assert reverse_entry.get('reason') == "customer no-show", "Reason not recorded in audit log"
+    assert reverse_entry.get('reversal_event_id') == reversal_event_id, "Reversal event ID not recorded"
+    log(f"  ✓ Audit log verified: REVERSE_EVENT entry found with reason and reversal_event_id")
+    
+    # E8. Verify original event has reversal metadata
+    log("\n[E8] Verifying original event has reversal metadata...")
+    resp = requests.get(f"{BASE_URL}/events/{event_ids['A2_cash_booking']}")
+    assert resp.status_code == 200, f"Failed to get event: {resp.status_code} - {resp.text}"
+    original_event = resp.json()
+    
+    assert original_event.get('reversed_by_event_id') == reversal_event_id, "reversed_by_event_id not set"
+    assert 'reversal_event' in original_event, "reversal_event not included in response"
+    log(f"  ✓ Original event metadata verified: reversed_by_event_id set, reversal_event included")
+    
+    log("\n✓ STEP E COMPLETE: All reversal validations passed")
+    
+    # ========================================================================
+    # STEP F: REVERSE MEMBERSHIP_SALE
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP F: REVERSE MEMBERSHIP_SALE A5")
+    log("=" * 80)
+    
+    # F1. Reverse membership sale
+    log("\n[F1] Reversing MEMBERSHIP_SALE A5...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A5_membership_sale']}/reverse", json={
+        "reason": "data entry error",
+        "actor": "manager1",
+        "role": "MANAGER"
+    })
+    assert resp.status_code == 200, f"Failed to reverse membership sale: {resp.status_code} - {resp.text}"
+    log(f"  ✓ Membership sale reversed")
+    
+    # F2. Verify membership is marked as reversed
+    log("\n[F2] Verifying membership is marked as reversed...")
+    resp = requests.get(f"{BASE_URL}/memberships/{membership_code}")
+    assert resp.status_code == 200, f"Failed to get membership: {resp.status_code} - {resp.text}"
+    membership = resp.json()
+    
+    assert membership['reversed'] == True, f"Membership not marked as reversed: {membership.get('reversed')}"
+    assert membership['active'] == False, f"Membership still active: {membership.get('active')}"
+    assert membership['remaining_paise'] == 0, f"Membership balance not zeroed: {membership.get('remaining_paise')}"
+    log(f"  ✓ Membership verified: reversed=True, active=False, remaining_paise=0")
+    
+    # F3. Try to create booking with reversed membership
+    log("\n[F3] Testing booking with reversed membership (should fail)...")
+    resp = requests.post(f"{BASE_URL}/events/booking", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "customer": "Delta",
+        "amount": 100000,
+        "payment_method": "MEMBERSHIP",
+        "redemption_ref": membership_code,
+        "created_by": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 400, f"Expected 400, got {resp.status_code}"
+    assert "reversed" in resp.text.lower(), "Error message should mention reversed membership"
+    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
+    
+    # F4. Verify dashboard after membership reversal
+    log("\n[F4] Verifying dashboard after membership reversal...")
+    resp = requests.get(f"{BASE_URL}/dashboard", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
+    dashboard = resp.json()['agg']
+    
+    # membership_sales should be 0, cash_sales should drop by 1000000
+    assert dashboard['membership_sales'] == 0, f"Membership sales should be 0: {dashboard['membership_sales']}"
+    assert dashboard['cash_sales'] == 600000, f"Cash sales should be 600000: {dashboard['cash_sales']}"  # 1600000 - 1000000
+    assert dashboard['closing_cash_expected'] == 950000, f"Closing cash should be 950000: {dashboard['closing_cash_expected']}"  # 1950000 - 1000000
+    log(f"  ✓ Dashboard verified: membership_sales=0, cash_sales=600000, closing_cash=950000")
+    
+    log("\n✓ STEP F COMPLETE: Membership reversal validated")
+    
+    # ========================================================================
+    # STEP G: REVERSE BOOKING WITH GIFT_CARD REDEMPTION
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP G: REVERSE BOOKING WITH GIFT_CARD REDEMPTION A8")
+    log("=" * 80)
+    
+    # G1. Check gift card balance before reversal
+    log("\n[G1] Checking gift card balance before reversal...")
+    resp = requests.get(f"{BASE_URL}/gift-cards/{gift_card_code}")
+    assert resp.status_code == 200, f"Failed to get gift card: {resp.status_code} - {resp.text}"
+    gift_card = resp.json()
+    assert gift_card['remaining_paise'] == 350000, f"Gift card balance should be 350000: {gift_card['remaining_paise']}"
+    log(f"  ✓ Gift card balance before reversal: {gift_card['remaining_paise']}")
+    
+    # G2. Reverse gift card redemption booking
+    log("\n[G2] Reversing GIFT_CARD redemption booking A8...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A8_gift_card_redemption']}/reverse", json={
+        "reason": "wrong card scanned",
+        "actor": "reception2",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to reverse gift card redemption: {resp.status_code} - {resp.text}"
+    log(f"  ✓ Gift card redemption reversed")
+    
+    # G3. Verify gift card balance is restored
+    log("\n[G3] Verifying gift card balance is restored...")
+    resp = requests.get(f"{BASE_URL}/gift-cards/{gift_card_code}")
+    assert resp.status_code == 200, f"Failed to get gift card: {resp.status_code} - {resp.text}"
+    gift_card = resp.json()
+    assert gift_card['remaining_paise'] == 500000, f"Gift card balance should be restored to 500000: {gift_card['remaining_paise']}"
+    log(f"  ✓ Gift card balance restored: {gift_card['remaining_paise']}")
+    
+    # G4. Verify redemption_count decremented
+    log("\n[G4] Verifying redemption_count decremented...")
+    assert gift_card['redemption_count'] == 0, f"Redemption count should be 0: {gift_card['redemption_count']}"
+    log(f"  ✓ Redemption count: {gift_card['redemption_count']}")
+    
+    # G5. Verify dashboard redemptions count
+    log("\n[G5] Verifying dashboard redemptions count...")
+    resp = requests.get(f"{BASE_URL}/dashboard", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
+    dashboard = resp.json()['agg']
+    assert dashboard['redemptions'] == 1, f"Redemptions should be 1: {dashboard['redemptions']}"  # 2 - 1
+    log(f"  ✓ Dashboard redemptions: {dashboard['redemptions']}")
+    
+    log("\n✓ STEP G COMPLETE: Gift card redemption reversal validated")
+    
+    # ========================================================================
+    # STEP H: BUSINESS DAY CLOSED + ROLE GATE
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP H: BUSINESS DAY CLOSED + ROLE GATE")
+    log("=" * 80)
+    
+    # H1. Close business day
+    log("\n[H1] Closing business day...")
+    resp = requests.post(f"{BASE_URL}/business-day/close", json={
+        "centre_id": centre_id,
+        "business_date": test_date,
+        "closing_cash_declared": 0,
+        "actor": "reception",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 200, f"Failed to close business day: {resp.status_code} - {resp.text}"
+    log(f"  ✓ Business day closed")
+    
+    # H2. Try to reverse with RECEPTION role (should fail)
+    log("\n[H2] Testing reversal with RECEPTION role on closed day (should fail)...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A3_upi_booking']}/reverse", json={
+        "reason": "test closed day",
+        "actor": "reception1",
+        "role": "RECEPTION"
+    })
+    assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
+    assert "closed" in resp.text.lower() and "manager" in resp.text.lower(), "Error message should mention closed day and manager approval"
+    log(f"  ✓ Correctly rejected: {resp.json()['error']}")
+    
+    # H3. Reverse with MANAGER role (should succeed)
+    log("\n[H3] Reversing with MANAGER role on closed day...")
+    resp = requests.post(f"{BASE_URL}/events/{event_ids['A3_upi_booking']}/reverse", json={
+        "reason": "manager override",
+        "actor": "mgr",
+        "role": "MANAGER"
+    })
+    assert resp.status_code == 200, f"Failed to reverse with MANAGER role: {resp.status_code} - {resp.text}"
+    log(f"  ✓ Reversal succeeded with MANAGER role")
+    
+    # H4. Verify dashboard UPI sales decreased
+    log("\n[H4] Verifying dashboard UPI sales decreased...")
+    resp = requests.get(f"{BASE_URL}/dashboard", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get dashboard: {resp.status_code} - {resp.text}"
+    dashboard = resp.json()['agg']
+    assert dashboard['upi_sales'] == 200000, f"UPI sales should be 200000: {dashboard['upi_sales']}"  # 600000 - 400000
+    log(f"  ✓ Dashboard UPI sales: {dashboard['upi_sales']}")
+    
+    log("\n✓ STEP H COMPLETE: Business day closed + role gate validated")
+    
+    # ========================================================================
+    # STEP I: CASH-BOOK AFTER REVERSALS
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("STEP I: CASH-BOOK AFTER REVERSALS")
+    log("=" * 80)
+    
+    log("\n[I] Fetching cash-book...")
+    resp = requests.get(f"{BASE_URL}/cash-book", params={
+        "centre_id": centre_id,
+        "date": test_date
+    })
+    assert resp.status_code == 200, f"Failed to get cash-book: {resp.status_code} - {resp.text}"
+    cash_book = resp.json()
+    
+    lines = cash_book['lines']
+    agg = cash_book['agg']
+    
+    # Verify last line running balance equals closing_cash_expected
+    last_line = lines[-1]
+    assert last_line['running'] == agg['closing_cash_expected'], \
+        f"Last running balance {last_line['running']} != closing_cash_expected {agg['closing_cash_expected']}"
+    log(f"  ✓ Last running balance matches closing_cash_expected: {last_line['running']}")
+    
+    # Verify reversal lines are present
+    reversal_lines = [line for line in lines if line.get('is_reversal')]
+    assert len(reversal_lines) > 0, "No reversal lines found in cash-book"
+    log(f"  ✓ Reversal lines present in cash-book: {len(reversal_lines)} lines")
+    
+    log("\n✓ STEP I COMPLETE: Cash-book validated")
+    
+    # ========================================================================
+    # FINAL SUMMARY
+    # ========================================================================
+    log("\n" + "=" * 80)
+    log("✅ ALL TESTS PASSED - AUDIT & INVESTIGATION MODULE WORKING CORRECTLY")
+    log("=" * 80)
+    log("\nSummary:")
+    log("  ✓ Step A: 11 events seeded successfully")
+    log("  ✓ Step B: Baseline dashboard metrics verified")
+    log("  ✓ Step C: Drill-down for all metrics validated")
+    log("  ✓ Step D: Enriched event details verified")
+    log("  ✓ Step E: CASH booking reversal validated")
+    log("  ✓ Step F: Membership sale reversal validated")
+    log("  ✓ Step G: Gift card redemption reversal validated")
+    log("  ✓ Step H: Business day closed + role gate validated")
+    log("  ✓ Step I: Cash-book after reversals validated")
+    log("\n" + "=" * 80)
 
 if __name__ == "__main__":
-    main()
+    try:
+        test_audit_investigation_module()
+        print("\n✅ TEST SUITE COMPLETED SUCCESSFULLY")
+        exit(0)
+    except AssertionError as e:
+        print(f"\n❌ TEST FAILED: {e}")
+        exit(1)
+    except Exception as e:
+        print(f"\n❌ UNEXPECTED ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        exit(1)
