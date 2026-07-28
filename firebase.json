@@ -1,6 +1,6 @@
 {
   "apphosting": {
-    "backendId": "new-moroccan-admin",
+    "backendId": "moroccan-crm",
     "rootDir": "./"
   }
 }
