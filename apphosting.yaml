@@ -1,0 +1,21 @@
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 0
+  maxInstances: 10
+
+env:
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    value: "https://zciclpvqrklutlvgcfig.supabase.co"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjaWNscHZxcmtsdXRsdmdjZmlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyMzQ0NDksImV4cCI6MjEwMDgxMDQ0OX0.iy8CLz9NJGgACX-eKLZ6euF5Ghchi_v8nbc7W4aSlqg"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: SUPABASE_SERVICE_ROLE_KEY
+    value: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpjaWNscHZxcmtsdXRsdmdjZmlnIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NTIzNDQ0OSwiZXhwIjoyMTAwODEwNDQ5fQ.FFJov3oFhBrwRYFxipBECFG__rtnnHxkUlU_7EatC18"
+    availability:
+      - RUNTIME

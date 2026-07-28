@@ -1,0 +1,6 @@
+{
+  "apphosting": {
+    "backendId": "new-moroccan-admin",
+    "rootDir": "./"
+  }
+}
