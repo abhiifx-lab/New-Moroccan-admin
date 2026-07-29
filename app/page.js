@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -17,7 +19,7 @@ import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
   Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
-  Download, FileSpreadsheet
+  Download, FileSpreadsheet, Menu
 } from 'lucide-react'
 
 // ---------- utils ----------
@@ -175,7 +177,7 @@ function DrillDownDialog({ ctx, role, bump }) {
           <DialogHeader>
             <div className="flex items-center gap-2">
               {historyStack.length > 0 && (
-                <Button variant="ghost" size="icon" onClick={goBack} className="h-7 w-7"><ArrowLeft className="h-4 w-4"/></Button>
+                <Button variant="ghost" size="icon" aria-label="Go back" onClick={goBack} className="h-9 w-9"><ArrowLeft className="h-4 w-4"/></Button>
               )}
               <DialogTitle className="flex-1">
                 {stage === 'metric' && metricData ? `Investigate: ${metricData.label}` : 'Event Detail'}
@@ -245,7 +247,7 @@ function MetricStage({ data, onEvent }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div data-kpi-grid="true" className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <MiniStat label="Metric Total" value={data.isCount ? data.total : formatINR(data.total)} accent="text-emerald-500"/>
         <MiniStat label="Events" value={events.length}/>
         <MiniStat label="Event Types" value={Object.keys(data.breakdown||{}).length}/>
@@ -515,8 +517,12 @@ function KV({ k, v }) {
 // ============================================================================
 function Stat({ label, value, hint, accent, onClick }) {
   const clickable = !!onClick
+  const activate = (event) => {
+    if (!clickable || !['Enter', ' '].includes(event.key)) return
+    event.preventDefault(); onClick()
+  }
   return (
-    <Card className={`border-border/50 bg-card/60 backdrop-blur ${clickable?'cursor-pointer hover:border-primary/50 transition-colors':''}`} onClick={onClick}>
+    <Card role={clickable?'button':undefined} tabIndex={clickable?0:undefined} aria-label={clickable?`${label}: ${value}. Open details`:undefined} className={`border-border/50 bg-card/60 backdrop-blur ${clickable?'cursor-pointer hover:border-primary/50 transition-colors focus-visible:ring-2 focus-visible:ring-ring':''}`} onClick={onClick} onKeyDown={activate}>
       <CardContent className="p-5">
         <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center justify-between">{label}{clickable && <Search className="h-3 w-3 opacity-40"/>}</div>
         <div className={`mt-1 text-2xl font-semibold ${accent||''}`}>{value}</div>
@@ -526,13 +532,17 @@ function Stat({ label, value, hint, accent, onClick }) {
   )
 }
 function Row({ k, v, bold, onClick }) {
+  const activate = (event) => {
+    if (!onClick || !['Enter', ' '].includes(event.key)) return
+    event.preventDefault(); onClick()
+  }
   return (
-    <div className={`flex justify-between ${onClick?'cursor-pointer hover:text-primary transition-colors':''}`} onClick={onClick}>
+    <div role={onClick?'button':undefined} tabIndex={onClick?0:undefined} aria-label={onClick?`${k}: ${v}. Open details`:undefined} className={`flex justify-between gap-3 rounded-sm ${onClick?'cursor-pointer hover:text-primary transition-colors focus-visible:ring-2 focus-visible:ring-ring':''}`} onClick={onClick} onKeyDown={activate}>
       <span className="text-muted-foreground">{k}</span><span className={bold?'font-semibold':''}>{v}</span>
     </div>
   )
 }
-function Field({ l, children }) { return <div className="space-y-1"><Label className="text-xs text-muted-foreground">{l}</Label>{children}</div> }
+function Field({ l, children }) { return <div role="group" aria-label={l} className="space-y-1.5"><Label className="text-xs font-semibold text-muted-foreground">{l}</Label>{children}</div> }
 function CollectiveScopeNotice({ feature }) {
   return (
     <Card>
@@ -561,6 +571,14 @@ function DashboardView({ centre, refreshTick, onDrill }) {
   const a = data?.agg || data?.single_centre?.agg || data?.consolidated || {}
   const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre?.id || 'ALL', date })
 
+  if (loading && !data) return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading dashboard">
+      <div className="space-y-2"><Skeleton className="h-8 w-48"/><Skeleton className="h-4 w-full max-w-md"/></div>
+      <div data-kpi-grid="true" className="grid grid-cols-2 gap-4 md:grid-cols-4">{[0,1,2,3].map(i=><Skeleton key={i} className="h-28 rounded-2xl"/>)}</div>
+      <div className="grid gap-4 md:grid-cols-3">{[0,1,2].map(i=><Skeleton key={i} className="h-52 rounded-2xl"/>)}</div>
+    </div>
+  )
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -569,12 +587,12 @@ function DashboardView({ centre, refreshTick, onDrill }) {
           <p className="text-sm text-muted-foreground">Every number is clickable — drill down to source events.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
-          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+          <Input aria-label="Dashboard date" type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
+          <Button variant="outline" size="icon" aria-label="Refresh dashboard" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div data-kpi-grid="true" className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Stat label="Today's Revenue" value={formatINR(a.total_revenue)} hint={`${a.bookings||0} bookings • ${a.redemptions||0} redemptions`} accent="text-emerald-500" onClick={()=>drill('total_revenue')}/>
         <Stat label="Guests" value={a.guests||0} hint="Unique customers today" onClick={()=>drill('guests')}/>
         <Stat label="Expenses" value={formatINR(a.total_expenses)} hint={`${a.expenses_count||0} entries`} accent="text-rose-500" onClick={()=>drill('total_expenses')}/>
@@ -763,7 +781,7 @@ function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
                   <div className="md:col-span-3 text-xs text-muted-foreground">{lookupLoading?'Looking up customer…':customerData?.found?'Existing customer loaded':'Enter a mobile number to find or create a customer'}</div>
                 </CardContent></Card>
 
-                {customerData?.found && <Card><CardHeader className="py-3"><CardTitle className="text-sm">Customer Intelligence</CardTitle></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-0">
+                {customerData?.found && <Card><CardHeader className="py-3"><CardTitle className="text-sm">Customer Intelligence</CardTitle></CardHeader><CardContent data-kpi-grid="true" className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-0">
                   <MiniStat label="Previous Visits" value={customerData.intelligence?.previous_visits || 0}/><MiniStat label="Last Visit" value={customerData.intelligence?.last_visit?new Date(customerData.intelligence.last_visit).toLocaleDateString('en-IN'):'—'}/>
                   <MiniStat label="Preferred Therapist" value={customerData.intelligence?.preferred_therapist || '—'}/><MiniStat label="Lifetime Spend" value={formatINR(customerData.intelligence?.lifetime_spend_paise)}/>
                   <MiniStat label="Membership Balance" value={formatINR(customerData.intelligence?.membership_balance_paise)}/><MiniStat label="Gift Card Balance" value={formatINR(customerData.intelligence?.gift_card_balance_paise)}/>
@@ -791,7 +809,7 @@ function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
                 {finalReceivable>0 && <Card><CardHeader className="py-3"><CardTitle className="text-sm">5. Payment</CardTitle></CardHeader><CardContent className="pt-0"><Field l="Payment Method"><Select value={f.payment_method} onValueChange={v=>setF({...f,payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field></CardContent></Card>}
               </div>
 
-              <Card className="h-fit sticky top-0 border-amber-500/30"><CardHeader><CardTitle>Booking Summary</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">
+              <Card className="h-fit border-amber-500/30 lg:sticky lg:top-0"><CardHeader><CardTitle>Booking Summary</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">
                 <Row k="Treatment" v={f.treatment_name || '—'}/><Row k="Variant" v={selectedVariant?.variant_name || (selectedVariant?`${selectedVariant.duration} Minutes`:'—')}/><Row k="Therapist" v={selectedTherapist?.name || '—'}/>
                 <div className="border-t border-border/50 my-2"/><Row k="Base Price" v={formatINR(basePrice)}/><Row k="Offer Discount" v={`− ${formatINR(offerDiscount)}`}/><Row k="Membership Redemption" v={`− ${formatINR(membershipRedemption)}`}/><Row k="Gift Card Redemption" v={`− ${formatINR(giftCardRedemption)}`}/><div className="border-t border-border/50 my-2"/><Row k="Final Receivable" v={formatINR(finalReceivable)} bold/>
                 {finalReceivable===0 && basePrice>0 && <Badge variant="secondary" className="w-full justify-center py-1">Fully covered by stored value</Badge>}
@@ -1105,9 +1123,9 @@ function RegisterView({ centre, onDrill, refreshTick }) {
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Master Register</h2><p className="text-sm text-muted-foreground">Excel-like daily aggregate. Every cell is clickable — drills to source events.</p></div>
         <div className="flex items-center gap-2">
-          <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
-          <span>—</span><Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
-          <Button variant="outline" size="icon" onClick={load} title="Refresh"><RefreshCw className="h-4 w-4"/></Button>
+          <Input aria-label="Register start date" type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
+          <span aria-hidden="true">—</span><Input aria-label="Register end date" type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
+          <Button variant="outline" size="icon" aria-label="Refresh register" onClick={load} title="Refresh"><RefreshCw className="h-4 w-4"/></Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="default" className="gap-2 font-medium">
@@ -1211,7 +1229,7 @@ function CashBookView({ centre, onDrill, refreshTick }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Cash Book</h2><p className="text-sm text-muted-foreground">Cash-only ledger with running balance. Click any line to inspect the source event.</p></div>
-        <div className="flex items-center gap-2"><Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]"/><Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button></div>
+        <div className="flex items-center gap-2"><Input aria-label="Cash book date" type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]"/><Button variant="outline" size="icon" aria-label="Refresh cash book" onClick={load}><RefreshCw className="h-4 w-4"/></Button></div>
       </div>
       <div className="grid grid-cols-3 gap-4">
         <Stat label="Opening Cash" value={formatINR(agg.opening_cash)}/>
@@ -1276,8 +1294,8 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-semibold">Business Day — {centre.name}</h2>
         <div className="flex items-center gap-2">
-          <Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
-          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+          <Input aria-label="Business date" type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
+          <Button variant="outline" size="icon" aria-label="Refresh business day" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
         </div>
       </div>
       <div className="grid md:grid-cols-3 gap-4">
@@ -1424,10 +1442,10 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
               {role === 'SUPER' && <SelectItem value="ALL">All Centres (consolidated)</SelectItem>}
             </SelectContent>
           </Select>
-          <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
+          <Input aria-label="Report start date" type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
           <span>—</span>
-          <Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
-          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+          <Input aria-label="Report end date" type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
+          <Button variant="outline" size="icon" aria-label="Refresh reports" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
           <Button onClick={downloadCsv}><FileText className="h-4 w-4 mr-2"/>Export CSV</Button>
         </div>
       </div>
@@ -1436,7 +1454,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
       <Card>
         <CardHeader><CardTitle className="text-sm text-muted-foreground">Profit &amp; Loss ({from} → {to})</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div data-kpi-grid="true" className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MiniStat label="Gross Revenue" value={formatINR(totals.gross_revenue)} accent="text-emerald-500"/>
             <MiniStat label="Revenue Reversals" value={formatINR(totals.revenue_reversals)} accent="text-rose-500"/>
             <MiniStat label="Net Revenue" value={formatINR(totals.net_revenue)} accent="font-semibold"/>
@@ -1478,7 +1496,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
       <Card>
         <CardHeader><CardTitle className="text-sm text-muted-foreground">Cash Report (period totals)</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+          <div data-kpi-grid="true" className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <MiniStat label="Opening Cash" value={formatINR(totals.opening_cash)}/>
             <MiniStat label="Cash Sales" value={formatINR(totals.cash_sales)} accent="text-emerald-500"/>
             <MiniStat label="Float Added" value={formatINR(totals.float_added)}/>
@@ -1874,6 +1892,71 @@ function TherapistsView({ centre, centres, bump, refreshTick }) {
   )
 }
 
+function NavigationPanel({ profile, centre, centres, navItems, view, setView, setCentre, onLogout, onNavigate }) {
+  const navigate = (nextView) => {
+    setView(nextView)
+    onNavigate?.()
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center gap-3 px-2 py-2">
+        <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl shadow-md shadow-amber-500/15">
+          <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-semibold tracking-tight">Moroccan Spa</div>
+          <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Business OS</div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/35 p-3">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-xs font-semibold text-foreground">{profile.full_name || profile.email}</div>
+          <Badge className="mt-1 border border-amber-500/30 bg-amber-500/15 px-1.5 py-0 font-mono text-[10px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-300">
+            {profile.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'CENTRE USER'}
+          </Badge>
+        </div>
+        <Button variant="ghost" size="icon" aria-label="Log out" title="Logout" onClick={onLogout} className="shrink-0 hover:bg-rose-500/15 hover:text-rose-500">
+          <LogOut className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="mt-4 space-y-1.5">
+        <Label className="px-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Centre Scope</Label>
+        {profile.role === 'SUPER_ADMIN' ? (
+          <Select value={centre.id} onValueChange={value=>{ setCentre(value === 'ALL' ? ALL_CENTRES : centres.find(c=>c.id===value)); onNavigate?.() }}>
+            <SelectTrigger className="bg-background/70"><SelectValue/></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL"><Building2 className="mr-1 inline h-3 w-3 text-amber-500"/>All Centres (Collective)</SelectItem>
+              {centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="mr-1 inline h-3 w-3 text-amber-500"/>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        ) : (
+          <div className="flex min-h-10 items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200">
+            <Building2 className="h-4 w-4 shrink-0 text-amber-500"/><span className="truncate">{centre.name}</span>
+          </div>
+        )}
+      </div>
+
+      <nav aria-label="Primary navigation" className="app-nav-scroll mt-5 flex-1 space-y-1 overflow-y-auto pr-1">
+        {navItems.map(item => {
+          const active = view === item.id
+          const NavIcon = item.icon
+          return (
+            <button key={item.id} type="button" aria-current={active?'page':undefined} onClick={()=>navigate(item.id)}
+              className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-all ${active?'bg-primary text-primary-foreground shadow-sm':'text-foreground/75 hover:bg-muted hover:text-foreground'}`}>
+              <NavIcon className="h-4 w-4 shrink-0"/><span className="truncate">{item.label}</span>
+              {active && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70"/>}
+            </button>
+          )
+        })}
+      </nav>
+      <div className="mt-3 border-t border-border/50 px-2 py-3 text-[10px] text-muted-foreground">One transaction • One source • Infinite reports</div>
+    </div>
+  )
+}
+
 // ============================================================================
 // SHELL
 // ============================================================================
@@ -1884,6 +1967,7 @@ function App() {
   const [centres, setCentres] = useState([])
   const [centre, setCentre] = useState(null)
   const [view, setView] = useState('dashboard')
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [bump, setBump] = useState(0)
   const [drillCtx, setDrillCtx] = useState(null)
 
@@ -1953,93 +2037,62 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted/20">
-      <Toaster theme="dark" position="top-right" richColors />
-      <div className="flex">
-        <aside className="w-64 h-screen sticky top-0 border-r border-border/50 bg-card/40 backdrop-blur p-4 flex flex-col">
-          <div className="flex items-center gap-2 px-2 py-3">
-            <div className="h-9 w-9 rounded-lg overflow-hidden shadow-md shadow-amber-500/20">
-              <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
-            </div>
-            <div>
-              <div className="font-semibold tracking-tight">Moroccan Spa</div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Business OS</div>
-            </div>
-          </div>
-
-          {/* User badge block */}
-          <div className="mt-4 p-2.5 rounded-lg bg-muted/30 border border-border/50 flex items-center justify-between gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-semibold truncate text-foreground">{profile.full_name || profile.email}</div>
-              <Badge className="mt-1 text-[10px] px-1.5 py-0 bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono">
-                {profile.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'CENTRE USER'}
-              </Badge>
-            </div>
-            <Button variant="ghost" size="icon" title="Logout" onClick={handleLogout} className="h-8 w-8 hover:bg-rose-500/20 hover:text-rose-400">
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Centre Scope Section */}
-          <div className="mt-4 space-y-1">
-            <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Centre Scope</Label>
-            {profile.role === 'SUPER_ADMIN' ? (
-              <Select value={centre.id} onValueChange={v=>setCentre(v === 'ALL' ? ALL_CENTRES : centres.find(c=>c.id===v))}>
-                <SelectTrigger className="bg-background/60"><SelectValue/></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL"><Building2 className="h-3 w-3 inline mr-1 text-amber-400"/>All Centres (Collective)</SelectItem>
-                  {centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="h-3 w-3 inline mr-1 text-amber-400"/>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            ) : (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-amber-500/10 border border-amber-500/30 text-sm font-medium text-amber-200">
-                <Building2 className="h-4 w-4 text-amber-400 shrink-0"/>
-                <span className="truncate">{centre.name}</span>
-              </div>
-            )}
-          </div>
-
-          <nav className="mt-6 flex-1 space-y-1 overflow-y-auto pr-1">
-            {navItems.map(n => {
-              const active = view === n.id
-              const N = n.icon
-              return (
-                <button key={n.id} onClick={()=>setView(n.id)}
-                  className={`w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${active?'bg-primary text-primary-foreground shadow-md shadow-primary/20':'hover:bg-muted text-foreground/80'}`}>
-                  <N className="h-4 w-4 shrink-0"/><span>{n.label}</span>
-                  {active && <ChevronRight className="h-3 w-3 ml-auto shrink-0"/>}
-                </button>
-              )
-            })}
-          </nav>
-          <div className="text-[10px] text-muted-foreground px-2 py-3 border-t border-border/50">One transaction • One source • Infinite reports</div>
+    <div className="app-shell bg-gradient-to-br from-background via-background to-muted/35">
+      <Toaster theme="system" position="top-right" richColors closeButton />
+      <div className="flex min-h-[100dvh] lg:h-[100dvh]">
+        <aside className="hidden h-[100dvh] w-64 shrink-0 border-r border-border/60 bg-card/70 p-4 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:flex-col">
+          <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} onLogout={handleLogout}/>
         </aside>
 
-        <main className="flex-1 p-8 max-w-[1600px] overflow-y-auto">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-6 pb-3 border-b border-border/40">
-            <Icon className="h-4 w-4 text-amber-400"/>
-            <span className="font-semibold text-foreground">{navItems.find(n=>n.id===view)?.label}</span>
-            <span className="mx-1.5 text-border">/</span>
-            <span className="flex items-center gap-1"><Building2 className="h-3.5 w-3.5"/>{centre.name}</span>
-            <span className="ml-auto text-xs font-mono bg-muted/40 px-2 py-1 rounded text-muted-foreground border border-border/30">
-              {new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}
-            </span>
-          </div>
+        <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+          <SheetContent side="left" className="safe-top safe-bottom w-[88vw] max-w-[340px] overflow-hidden p-4">
+            <SheetHeader className="sr-only"><SheetTitle>Application navigation</SheetTitle><SheetDescription>Choose a centre or section.</SheetDescription></SheetHeader>
+            <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} onLogout={handleLogout} onNavigate={()=>setMobileNavOpen(false)}/>
+          </SheetContent>
+        </Sheet>
 
-          {view==='dashboard'  && <DashboardView {...props} />}
-          {view==='booking'    && <BookingView {...props} />}
-          {view==='membership' && <MembershipView {...props} />}
-          {view==='giftcard'   && <GiftCardView {...props} />}
-          {view==='expense'    && <ExpenseView {...props} />}
-          {view==='cash'       && <CashMovementView {...props} />}
-          {view==='register'   && <RegisterView {...props} />}
-          {view==='cashbook'   && <CashBookView {...props} />}
-          {view==='close'      && <CloseView {...props} />}
-          {view==='reports'    && <ReportsView {...props} />}
-          {view==='therapists' && <TherapistsView {...props} />}
-          {view==='audit'      && <AuditView {...props} />}
-          {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col lg:h-[100dvh]">
+          <header className="safe-top sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-xl lg:hidden">
+            <div className="flex h-16 items-center gap-3 px-4">
+              <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={()=>setMobileNavOpen(true)} className="shrink-0"><Menu className="h-5 w-5"/></Button>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">{navItems.find(n=>n.id===view)?.label}</div>
+                <div className="flex items-center gap-1 truncate text-xs text-muted-foreground"><Building2 className="h-3 w-3 shrink-0"/><span className="truncate">{centre.name}</span></div>
+              </div>
+              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg"><img src="/logo.png" alt="" className="h-full w-full object-cover"/></div>
+            </div>
+          </header>
+
+          <main id="main-content" className="app-content min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7" tabIndex={-1}>
+            <div className="mx-auto w-full max-w-[1600px]">
+              <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground lg:flex">
+                <Icon className="h-4 w-4 text-amber-500"/>
+                <span className="font-semibold text-foreground">{navItems.find(n=>n.id===view)?.label}</span>
+                <span className="mx-1.5 text-border">/</span>
+                <span className="flex min-w-0 items-center gap-1"><Building2 className="h-3.5 w-3.5 shrink-0"/><span className="truncate">{centre.name}</span></span>
+                <span className="ml-auto rounded-lg border border-border/40 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
+                  {new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}
+                </span>
+              </div>
+
+              <div key={`${view}-${centre.id}`} className="view-surface">
+                {view==='dashboard'  && <DashboardView {...props} />}
+                {view==='booking'    && <BookingView {...props} />}
+                {view==='membership' && <MembershipView {...props} />}
+                {view==='giftcard'   && <GiftCardView {...props} />}
+                {view==='expense'    && <ExpenseView {...props} />}
+                {view==='cash'       && <CashMovementView {...props} />}
+                {view==='register'   && <RegisterView {...props} />}
+                {view==='cashbook'   && <CashBookView {...props} />}
+                {view==='close'      && <CloseView {...props} />}
+                {view==='reports'    && <ReportsView {...props} />}
+                {view==='therapists' && <TherapistsView {...props} />}
+                {view==='audit'      && <AuditView {...props} />}
+                {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
+              </div>
+            </div>
+          </main>
+        </div>
       </div>
 
       <DrillDownDialog ctx={drillCtx} role={role} bump={() => setBump(b=>b+1)} />
