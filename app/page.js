@@ -925,7 +925,7 @@ function RegisterView({ centre, onDrill, refreshTick }) {
             <TableHead className="text-right">Cash</TableHead><TableHead className="text-right">UPI</TableHead><TableHead className="text-right">Card</TableHead>
             <TableHead className="text-right">Expense</TableHead>
             <TableHead className="text-right">Deposit</TableHead><TableHead className="text-right">Withdraw</TableHead>
-            <TableHead className="text-right">Closing Exp.</TableHead>
+            <TableHead className="text-right">Closing Balance</TableHead>
             <TableHead className="text-right">Guests</TableHead><TableHead>Status</TableHead>
           </TableRow></TableHeader>
           <TableBody>
@@ -944,7 +944,9 @@ function RegisterView({ centre, onDrill, refreshTick }) {
                 {Cell('total_expenses', formatINR(r.total_expenses), 'text-rose-500')}
                 {Cell('cash_deposited', formatINR(r.cash_deposited))}
                 {Cell('cash_withdrawn', formatINR(r.cash_withdrawn))}
-                {Cell('closing_cash_expected', formatINR(r.closing_cash_expected), 'font-semibold')}
+                <TableCell className="text-right font-semibold" title={r.status === 'CLOSED' ? `Expected: ${formatINR(r.closing_cash_expected)} · Variance: ${formatINR(r.cash_variance)}` : 'Live expected balance until the day is closed'}>
+                  {formatINR(r.closing_cash_balance)}
+                </TableCell>
                 {Cell('guests', r.guests)}
                 <TableCell><Badge variant={r.status==='CLOSED'?'default':'secondary'}>{r.status}</Badge></TableCell>
               </TableRow>)
@@ -1741,4 +1743,3 @@ function App() {
 }
 
 export default App
-
