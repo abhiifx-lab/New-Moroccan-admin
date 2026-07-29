@@ -1695,62 +1695,93 @@ function LoginScreen({ onLogin }) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-card to-muted/30 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md border-border/60 shadow-2xl bg-card/80 backdrop-blur-md">
-        <CardHeader className="space-y-3 text-center pb-6 border-b border-border/40">
-          <div className="mx-auto h-14 w-14 rounded-2xl overflow-hidden shadow-lg shadow-amber-500/20">
+    <div className="grid min-h-[100dvh] bg-white text-slate-950 lg:grid-cols-[minmax(0,1.06fr)_minmax(430px,0.94fr)]">
+      <section aria-label="Moroccan Spa experience" className="relative hidden min-h-[100dvh] overflow-hidden bg-slate-950 lg:flex lg:flex-col lg:justify-between">
+        <img src="/login-spa.png" alt="Moroccan Spa massage experience" className="absolute inset-0 h-full w-full object-cover object-center"/>
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-950/55 via-slate-950/5 to-slate-950/70"/>
+        <div className="absolute inset-0 bg-gradient-to-br from-emerald-950/20 via-transparent to-blue-950/25"/>
+
+        <div className="relative z-10 flex items-center gap-3 p-8 xl:p-10">
+          <div className="h-11 w-11 overflow-hidden rounded-2xl bg-white shadow-xl shadow-black/15">
             <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
           </div>
-          <div>
-            <CardTitle className="text-2xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-rose-400 bg-clip-text text-transparent">
-              Moroccan Spa
-            </CardTitle>
-            <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">
-              Multi-Centre Single Source of Truth
-            </p>
+          <div className="text-white">
+            <div className="font-semibold tracking-tight">Moroccan Spa</div>
+            <div className="text-[10px] uppercase tracking-[0.2em] text-white/55">Business OS</div>
           </div>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-4">
+        </div>
+
+        <div className="relative z-10 flex-1"/>
+
+        <div className="relative z-10 p-8 text-white xl:p-10">
+          <p className="max-w-lg text-lg font-medium leading-relaxed text-white/90">Every calm day starts with a beautifully organised centre.</p>
+          <p className="mt-2 text-xs text-white/45">One transaction • One source • Every centre in sync</p>
+        </div>
+      </section>
+
+      <main className="relative flex min-h-[100dvh] flex-col bg-[radial-gradient(circle_at_100%_0%,rgba(59,130,246,0.08),transparent_32%),radial-gradient(circle_at_0%_100%,rgba(16,185,129,0.08),transparent_34%),#fff] px-6 py-7 sm:px-10 lg:px-12 xl:px-16">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5 lg:hidden">
+            <div className="h-9 w-9 overflow-hidden rounded-xl shadow-sm"><img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover"/></div>
+            <div><div className="text-sm font-semibold">Moroccan Spa</div><div className="text-[9px] uppercase tracking-[0.18em] text-slate-400">Business OS</div></div>
+          </div>
+          <div className="ml-auto flex items-center gap-2 text-xs font-medium text-slate-500"><Lock className="h-3.5 w-3.5"/>Secure login</div>
+        </div>
+
+        <div className="mx-auto flex w-full max-w-[390px] flex-1 items-center py-12 sm:py-16">
+          <div className="w-full">
+            <div className="mb-9">
+              <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-700">Welcome back</div>
+              <h1 className="text-3xl font-bold tracking-[-0.035em] text-slate-950 sm:text-4xl">Hey Moroccan,<br/>how’s your day?</h1>
+              <p className="mt-4 text-sm leading-6 text-slate-500">Sign in to open your centre workspace and continue where you left off.</p>
+            </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
             {error && (
-              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email Address</Label>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-sm font-medium text-slate-700">Username</Label>
               <Input
                 id="email"
-                type="email"
-                placeholder="admin@moroccanspa.in or phoenix@moroccanspa.in"
+                type="text"
+                inputMode="email"
+                autoComplete="username"
+                placeholder="name@moroccanspa.in"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="bg-background/60 border-border/60 focus:border-amber-500 h-11"
+                className="h-12 rounded-xl border-slate-200 bg-white/80 px-4 text-sm shadow-sm placeholder:text-slate-300 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Password</Label>
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-sm font-medium text-slate-700">Password</Label>
               <Input
                 id="password"
                 type="password"
+                autoComplete="current-password"
                 placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="bg-background/60 border-border/60 focus:border-amber-500 h-11"
+                className="h-12 rounded-xl border-slate-200 bg-white/80 px-4 text-sm shadow-sm placeholder:text-slate-300 focus-visible:border-emerald-500 focus-visible:ring-emerald-500/20"
               />
             </div>
-            <Button type="submit" disabled={loading} className="w-full h-11 font-semibold bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-600 hover:to-rose-600 text-white shadow-lg shadow-amber-500/20 mt-2">
-              {loading ? 'Authenticating...' : 'Sign In to Business OS'}
+            <Button type="submit" disabled={loading} className="mt-2 h-12 w-full rounded-xl bg-slate-950 font-semibold text-white shadow-lg shadow-slate-950/10 transition hover:bg-slate-800">
+              {loading ? 'Signing you in…' : 'Sign in'}
             </Button>
           </form>
-          <div className="mt-6 text-center text-[11px] text-muted-foreground border-t border-border/40 pt-4">
-            Database-level RLS &amp; strict centre isolation enforced
+          <div className="mt-7 flex items-center justify-center gap-2 text-center text-[11px] text-slate-400">
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-600"/>Protected access with strict centre isolation
           </div>
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+
+        <div className="text-center text-[10px] uppercase tracking-[0.16em] text-slate-300">Moroccan Spa Business Operating System</div>
+      </main>
     </div>
   )
 }
