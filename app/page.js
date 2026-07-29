@@ -27,6 +27,11 @@ const formatINR = (paise) => {
   const sign = n < 0 ? '-' : ''
   return sign + '₹' + Math.abs(n).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
+const liabilityInitialPaise = (record) => {
+  const canonical = Number(record?.original_paise || 0)
+  if (canonical > 0) return canonical
+  return Number(record?.initial_paise || record?.remaining_paise || 0)
+}
 const todayStr = () => {
   const d = new Date()
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
@@ -390,7 +395,7 @@ function EventStage({ ev, onReverse, role, onOpenRelated }) {
                 <>
                   <KV k="Code" v={<span className="font-mono">{(ev.membership||ev.gift_card).code}</span>}/>
                   <KV k="Customer" v={(ev.membership||ev.gift_card).customer || (ev.gift_card?.buyer)}/>
-                  <KV k="Initial" v={formatINR((ev.membership||ev.gift_card).original_paise)}/>
+                  <KV k="Initial" v={formatINR(liabilityInitialPaise(ev.membership||ev.gift_card))}/>
                   <KV k="Remaining" v={<b>{formatINR((ev.membership||ev.gift_card).remaining_paise)}</b>}/>
                   <KV k="Redemptions" v={(ev.membership||ev.gift_card).redemption_count || 0}/>
                   {(ev.membership||ev.gift_card).reversed && <Badge variant="destructive">REVERSED</Badge>}
@@ -705,9 +710,9 @@ function MembershipView({ centre, role, bump, refreshTick }) {
             {list.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No memberships</TableCell></TableRow>}
             {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
               <TableCell className="font-mono text-xs">{m.code}</TableCell>
-              <TableCell>{m.buyer}</TableCell>
-              <TableCell className="text-xs">{m.sold_at_date}</TableCell>
-              <TableCell className="text-right">{formatINR(m.original_paise)}</TableCell>
+              <TableCell>{m.buyer || m.customer}</TableCell>
+              <TableCell className="text-xs">{m.sold_at_date || m.sold_business_date}</TableCell>
+              <TableCell className="text-right">{formatINR(liabilityInitialPaise(m))}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(m.remaining_paise)}</TableCell>
               <TableCell>{m.redemption_count}</TableCell>
               <TableCell>{m.reversed ? <Badge variant="destructive">REVERSED</Badge> : <Badge variant="secondary">ACTIVE</Badge>}</TableCell>
@@ -767,7 +772,7 @@ function GiftCardView({ centre, role, bump, refreshTick }) {
             {list.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No gift cards</TableCell></TableRow>}
             {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
               <TableCell className="font-mono text-xs">{m.code}</TableCell><TableCell>{m.buyer}</TableCell><TableCell>{m.recipient}</TableCell>
-              <TableCell className="text-right">{formatINR(m.original_paise)}</TableCell>
+              <TableCell className="text-right">{formatINR(liabilityInitialPaise(m))}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(m.remaining_paise)}</TableCell>
               <TableCell>{m.reversed ? <Badge variant="destructive">REVERSED</Badge> : <Badge variant="secondary">ACTIVE</Badge>}</TableCell>
             </TableRow>))}
