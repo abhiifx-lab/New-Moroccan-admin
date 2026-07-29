@@ -31,10 +31,10 @@ const APPROVED_CENTRES = [
 ]
 
 const SEED_USERS = [
-  { email: 'admin@aurea.spa', password: 'SuperSecretPassword123!', full_name: 'System Super Admin', role: 'SUPER_ADMIN', centre_id: null },
-  { email: 'phoenix@aurea.spa', password: 'PhoenixPassword123!', full_name: 'Phoenix Manager', role: 'CENTRE_USER', centre_id: 'b7b09f2b-4b4d-4ce7-8289-08947347af9b' },
-  { email: 'holidayinn@aurea.spa', password: 'HolidayPassword123!', full_name: 'Holiday Inn Manager', role: 'CENTRE_USER', centre_id: 'd15176b8-418e-4c76-a9eb-a2d2947ba5d9' },
-  { email: 'lulumall@aurea.spa', password: 'LuluPassword123!', full_name: 'Lulu Mall Manager', role: 'CENTRE_USER', centre_id: 'dc39e202-1bac-4411-9988-2bcaa72728d6' }
+  { email: 'admin@moroccanspa.in', password: 'SuperSecretPassword123!', full_name: 'System Super Admin', role: 'SUPER_ADMIN', centre_id: null },
+  { email: 'phoenix@moroccanspa.in', password: 'PhoenixPassword123!', full_name: 'Phoenix Manager', role: 'CENTRE_USER', centre_id: 'b7b09f2b-4b4d-4ce7-8289-08947347af9b' },
+  { email: 'holidayinn@moroccanspa.in', password: 'HolidayPassword123!', full_name: 'Holiday Inn Manager', role: 'CENTRE_USER', centre_id: 'd15176b8-418e-4c76-a9eb-a2d2947ba5d9' },
+  { email: 'lulumall@moroccanspa.in', password: 'LuluPassword123!', full_name: 'Lulu Mall Manager', role: 'CENTRE_USER', centre_id: 'dc39e202-1bac-4411-9988-2bcaa72728d6' }
 ]
 
 const SERVICES = [

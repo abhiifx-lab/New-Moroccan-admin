@@ -125,14 +125,14 @@ async function runProductionAudit() {
   // ---------------------------------------------------------
   console.log('\n--- [PHASE 3 & 4: ROW LEVEL SECURITY & AUTH AUDIT] ---')
   // Login tests
-  const { data: badLogin, error: badErr } = await anonSupabase.auth.signInWithPassword({ email: 'admin@aurea.spa', password: 'WrongPassword!' })
+  const { data: badLogin, error: badErr } = await anonSupabase.auth.signInWithPassword({ email: 'admin@moroccanspa.in', password: 'WrongPassword!' })
   assert(badErr !== null, 'Invalid login credentials correctly rejected')
 
   const accounts = [
-    { email: 'admin@aurea.spa', pw: 'SuperSecretPassword123!', role: 'SUPER_ADMIN', name: 'Super Admin' },
-    { email: 'phoenix@aurea.spa', pw: 'PhoenixPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[0], name: 'Phoenix Manager' },
-    { email: 'holidayinn@aurea.spa', pw: 'HolidayPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[1], name: 'Holiday Manager' },
-    { email: 'lulumall@aurea.spa', pw: 'LuluPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[2], name: 'Lulu Manager' }
+    { email: 'admin@moroccanspa.in', pw: 'SuperSecretPassword123!', role: 'SUPER_ADMIN', name: 'Super Admin' },
+    { email: 'phoenix@moroccanspa.in', pw: 'PhoenixPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[0], name: 'Phoenix Manager' },
+    { email: 'holidayinn@moroccanspa.in', pw: 'HolidayPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[1], name: 'Holiday Manager' },
+    { email: 'lulumall@moroccanspa.in', pw: 'LuluPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[2], name: 'Lulu Manager' }
   ]
 
   const clients = {}
@@ -147,8 +147,8 @@ async function runProductionAudit() {
   }
 
   // Verify RLS boundaries
-  if (clients['phoenix@aurea.spa']) {
-    const phnxClient = clients['phoenix@aurea.spa']
+  if (clients['phoenix@moroccanspa.in']) {
+    const phnxClient = clients['phoenix@moroccanspa.in']
     const { data: pOwn } = await phnxClient.from('events').select('id, centre_id').eq('centre_id', APPROVED_CENTRES[0].id)
     assert(pOwn !== null, `Phoenix Manager read access to own centre granted (${pOwn?.length || 0} records retrieved)`)
 
@@ -166,8 +166,8 @@ async function runProductionAudit() {
     assert(writeHoliday !== null, 'Phoenix Manager write attempt to Holiday Inn rejected by RLS')
   }
 
-  if (clients['lulumall@aurea.spa']) {
-    const luluClient = clients['lulumall@aurea.spa']
+  if (clients['lulumall@moroccanspa.in']) {
+    const luluClient = clients['lulumall@moroccanspa.in']
     const { data: lHoliday } = await luluClient.from('events').select('*').eq('centre_id', APPROVED_CENTRES[1].id)
     assert(lHoliday && lHoliday.length === 0, 'Lulu Manager read access to Holiday Inn data completely denied by RLS (0 rows)')
   }

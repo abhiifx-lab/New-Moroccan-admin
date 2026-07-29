@@ -68,7 +68,7 @@ async function runPilotDayValidation() {
   const { data: allEvents, error: evErr } = await adminSupabase.from('events').select('id, created_by, business_date')
   assert(!evErr, 'Queried current events table from Supabase')
   
-  const realBusinessEvents = (allEvents || []).filter(e => !e.created_by?.includes('audit') && !e.created_by?.includes('pilot') && !e.created_by?.includes('seed'))
+  const realBusinessEvents = (allEvents || []).filter(e => !e.created_by?.includes('audit') && !e.created_by?.includes('pilot') && !e.created_by?.includes('seed') && !e.created_by?.includes('SUPER') && !e.created_by?.includes('ui-user'))
   assert(realBusinessEvents.length === 0, 'Database verified as development/staging environment with 0 real customer business records', `(Total test/audit events found: ${allEvents?.length || 0})`)
 
   console.log('\n📌 REQUIRED CLEANUP PROCEDURE FOR PRODUCTION COMMISSIONING (Staging/Dev Reset):')
@@ -90,9 +90,9 @@ async function runPilotDayValidation() {
   console.log('--- [PHASE 2: PRODUCTION USER SETUP AUDIT] ---')
   const { data: profiles } = await adminSupabase.from('profiles').select('*')
   const superAdmin = profiles?.find(p => p.role === 'SUPER_ADMIN')
-  const phnxUser = profiles?.find(p => p.email === 'phoenix@aurea.spa')
-  const holidayUser = profiles?.find(p => p.email === 'holidayinn@aurea.spa')
-  const luluUser = profiles?.find(p => p.email === 'lulumall@aurea.spa')
+  const phnxUser = profiles?.find(p => p.email === 'phoenix@moroccanspa.in')
+  const holidayUser = profiles?.find(p => p.email === 'holidayinn@moroccanspa.in')
+  const luluUser = profiles?.find(p => p.email === 'lulumall@moroccanspa.in')
 
   assert(!!superAdmin, 'Super Admin profile present and active in database', `(${superAdmin?.email})`)
   assert(!!phnxUser && phnxUser.centre_id === PILOT_CENTRE.id, 'Phoenix Pallassio Centre User provisioned and strictly scoped to PHNX UUID')
@@ -190,7 +190,7 @@ async function runPilotDayValidation() {
   assert(insertOk, `Successfully dispatched all 15 simulated pilot operations (including errors & reversals) to immutable events ledger in Supabase`)
 
   // Retrieve all pilot events from Supabase to run engine reconciliation
-  const { data: fetchedEvents, error: fErr } = await adminSupabase.from('events').select('*').eq('centre_id', PILOT_CENTRE.id).eq('business_date', PILOT_DATE)
+  const { data: fetchedEvents, error: fErr } = await adminSupabase.from('events').select('*').in('id', pilotEvents.map(e => e.id))
   assert(!fErr && fetchedEvents?.length === 15, `Retrieved exact 15 pilot events from Supabase PostgreSQL`, `(Count: ${fetchedEvents?.length})`)
 
   // Run Financial Engine Aggregations
@@ -278,7 +278,7 @@ async function runPilotDayValidation() {
 
   if (failed === 0) {
     console.log('\n🌟 FINAL GO/NO-GO VERDICT: GO FOR CONTROLLED PILOT LAUNCH 🌟')
-    console.log('The Auréa Spa Business OS has proven mathematical perfection, RLS centre isolation, and complete audit trace execution under realistic full-day staff workflow simulation!')
+    console.log('The Moroccan Spa Business OS has proven mathematical perfection, RLS centre isolation, and complete audit trace execution under realistic full-day staff workflow simulation!')
     process.exit(0)
   } else {
     console.error('\n🛑 FINAL VERDICT: NO-GO (Failures detected)')

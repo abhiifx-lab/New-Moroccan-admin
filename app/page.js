@@ -10,11 +10,14 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { toast, Toaster } from 'sonner'
+import { exportRegisterExcel, exportRegisterPDF } from '@/lib/export-register'
 import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
-  Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key
+  Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
+  Download, FileSpreadsheet
 } from 'lucide-react'
 
 // ---------- utils ----------
@@ -862,6 +865,24 @@ function RegisterView({ centre, onDrill, refreshTick }) {
   }, [centre?.id, from, to])
   useEffect(() => { load() }, [load, refreshTick])
   const drill = (metric, date) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
+
+  const totals = useMemo(() => {
+    let booking_sales = 0, membership_sales = 0, gift_card_sales = 0, cash_sales = 0, upi_sales = 0, card_sales = 0, total_expenses = 0, cash_deposited = 0, cash_withdrawn = 0, guests = 0
+    rows.forEach(r => {
+      booking_sales += (r.booking_sales || 0)
+      membership_sales += (r.membership_sales || 0)
+      gift_card_sales += (r.gift_card_sales || 0)
+      cash_sales += (r.cash_sales || 0)
+      upi_sales += ((r.upi_1_sales || 0) + (r.upi_2_sales || 0))
+      card_sales += (r.card_sales || 0)
+      total_expenses += (r.total_expenses || 0)
+      cash_deposited += (r.cash_deposited || 0)
+      cash_withdrawn += (r.cash_withdrawn || 0)
+      guests += (r.guests || 0)
+    })
+    return { booking_sales, membership_sales, gift_card_sales, cash_sales, upi_sales, card_sales, total_expenses, cash_deposited, cash_withdrawn, guests }
+  }, [rows])
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -869,7 +890,31 @@ function RegisterView({ centre, onDrill, refreshTick }) {
         <div className="flex items-center gap-2">
           <Input type="date" value={from} onChange={e=>setFrom(e.target.value)} className="w-[150px]"/>
           <span>—</span><Input type="date" value={to} onChange={e=>setTo(e.target.value)} className="w-[150px]"/>
-          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+          <Button variant="outline" size="icon" onClick={load} title="Refresh"><RefreshCw className="h-4 w-4"/></Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="default" className="gap-2 font-medium">
+                <Download className="h-4 w-4" />
+                <span>Export</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[200px]">
+              <DropdownMenuItem onClick={() => exportRegisterExcel({ centre, from, to, rows })} className="cursor-pointer gap-2 py-2">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                <div className="flex flex-col">
+                  <span className="font-medium">Excel Sheet</span>
+                  <span className="text-[11px] text-muted-foreground">Download as .xlsx</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportRegisterPDF({ centre, from, to, rows })} className="cursor-pointer gap-2 py-2">
+                <FileText className="h-4 w-4 text-rose-600" />
+                <div className="flex flex-col">
+                  <span className="font-medium">PDF Document</span>
+                  <span className="text-[11px] text-muted-foreground">Download as .pdf</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       <Card><CardContent className="p-0 overflow-x-auto">
@@ -886,7 +931,6 @@ function RegisterView({ centre, onDrill, refreshTick }) {
           <TableBody>
             {rows.length===0 && <TableRow><TableCell colSpan={14} className="text-center text-muted-foreground py-6">No data in range</TableCell></TableRow>}
             {rows.map(r=>{
-              const D = (metric) => <span className="cursor-pointer hover:text-primary transition-colors" onClick={()=>drill(metric, r.business_date)}>{ }</span>
               const Cell = (metric, value, cls='') => <TableCell className={`text-right cursor-pointer hover:bg-muted ${cls}`} onClick={()=>drill(metric, r.business_date)}>{value}</TableCell>
               return (<TableRow key={r.business_date}>
                 <TableCell className="font-medium">{r.business_date}</TableCell>
@@ -905,6 +949,24 @@ function RegisterView({ centre, onDrill, refreshTick }) {
                 <TableCell><Badge variant={r.status==='CLOSED'?'default':'secondary'}>{r.status}</Badge></TableCell>
               </TableRow>)
             })}
+            {rows.length > 0 && (
+              <TableRow className="bg-muted/50 font-bold border-t-2">
+                <TableCell className="font-bold">TOTAL</TableCell>
+                <TableCell className="text-right">—</TableCell>
+                <TableCell className="text-right">{formatINR(totals.booking_sales)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.membership_sales)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.gift_card_sales)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.cash_sales)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.upi_sales)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.card_sales)}</TableCell>
+                <TableCell className="text-right text-rose-500">{formatINR(totals.total_expenses)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.cash_deposited)}</TableCell>
+                <TableCell className="text-right">{formatINR(totals.cash_withdrawn)}</TableCell>
+                <TableCell className="text-right">—</TableCell>
+                <TableCell className="text-right">{totals.guests}</TableCell>
+                <TableCell></TableCell>
+              </TableRow>
+            )}
           </TableBody>
         </Table>
       </CardContent></Card>
@@ -959,33 +1021,40 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
   const [declared, setDeclared] = useState('')
   const [notes, setNotes] = useState('')
   const [openingInput, setOpeningInput] = useState('')
+  const [date, setDate] = useState(todayStr())
   const load = useCallback(async () => {
-    const b = await apiGet(`/business-day?centre_id=${centre.id}&date=${todayStr()}`)
+    const b = await apiGet(`/business-day?centre_id=${centre.id}&date=${date}`)
     setBd(b); setOpeningInput(((b?.opening_cash||0)/100).toString())
-    setDash(await apiGet(`/dashboard?centre_id=${centre.id}&date=${todayStr()}`))
-  }, [centre?.id])
+    setDash(await apiGet(`/dashboard?centre_id=${centre.id}&date=${date}`))
+  }, [centre?.id, date])
   useEffect(()=>{ if(centre?.id) load() }, [load, refreshTick])
   const setOpening = async () => {
-    await apiPost('/business-day/set-opening', { centre_id: centre.id, opening_cash: toPaise(openingInput) })
+    await apiPost('/business-day/set-opening', { centre_id: centre.id, business_date: date, opening_cash: toPaise(openingInput) })
     toast.success('Opening cash set'); load(); bump()
   }
   const close = async () => {
-    const r = await apiPost('/business-day/close', { centre_id: centre.id, actor: role, role, closing_cash_declared: toPaise(declared), notes })
+    const r = await apiPost('/business-day/close', { centre_id: centre.id, business_date: date, actor: role, role, closing_cash_declared: toPaise(declared), notes })
     if (r.error) return toast.error(r.error)
     toast.success(`Day closed. Variance: ${formatINR(r.variance)}`); load(); bump()
   }
   const reopen = async () => {
     const reason = prompt('Reason for reopening?')
     if (!reason) return
-    const r = await apiPost('/business-day/reopen', { centre_id: centre.id, business_date: todayStr(), actor: role, role, reason })
+    const r = await apiPost('/business-day/reopen', { centre_id: centre.id, business_date: date, actor: role, role, reason })
     if (r.error) return toast.error(r.error)
     toast.success('Day reopened'); load(); bump()
   }
   const agg = dash?.agg || dash?.single_centre?.agg || dash?.consolidated || {}
-  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date: todayStr() })
+  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-semibold">Business Day — {centre.name}</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-semibold">Business Day — {centre.name}</h2>
+        <div className="flex items-center gap-2">
+          <Input type="date" value={date} onChange={e=>setDate(e.target.value)} className="w-[160px]" />
+          <Button variant="outline" size="icon" onClick={load}><RefreshCw className="h-4 w-4"/></Button>
+        </div>
+      </div>
       <div className="grid md:grid-cols-3 gap-4">
         <Stat label="Status" value={<Badge variant={bd?.status==='CLOSED'?'default':'secondary'}>{bd?.status||'—'}</Badge>}/>
         <Stat label="Opening Cash" value={formatINR(bd?.opening_cash)}/>
@@ -1352,12 +1421,12 @@ function LoginScreen({ onLogin }) {
     <div className="min-h-screen bg-gradient-to-br from-background via-card to-muted/30 flex items-center justify-center p-4">
       <Card className="w-full max-w-md border-border/60 shadow-2xl bg-card/80 backdrop-blur-md">
         <CardHeader className="space-y-3 text-center pb-6 border-b border-border/40">
-          <div className="mx-auto h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-400 via-amber-500 to-rose-600 flex items-center justify-center shadow-lg shadow-amber-500/20">
-            <Sparkles className="h-8 w-8 text-white" />
+          <div className="mx-auto h-14 w-14 rounded-2xl overflow-hidden shadow-lg shadow-amber-500/20">
+            <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
           </div>
           <div>
             <CardTitle className="text-2xl font-bold tracking-tight bg-gradient-to-r from-amber-200 via-amber-400 to-rose-400 bg-clip-text text-transparent">
-              Auréa Spa ERP
+              Moroccan Spa
             </CardTitle>
             <p className="text-xs text-muted-foreground uppercase tracking-widest mt-1">
               Multi-Centre Single Source of Truth
@@ -1377,7 +1446,7 @@ function LoginScreen({ onLogin }) {
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@aurea.spa or phoenix@aurea.spa"
+                placeholder="admin@moroccanspa.in or phoenix@moroccanspa.in"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -1444,7 +1513,7 @@ function UsersView({ centres, bump, refreshTick }) {
           <DialogContent className="sm:max-w-md">
             <DialogHeader><DialogTitle>Create Auth User &amp; Profile</DialogTitle><DialogDescription>Provision credentials and set access scope.</DialogDescription></DialogHeader>
             <div className="space-y-4 py-2">
-              <div><Label>Email</Label><Input type="email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} placeholder="user@aurea.spa"/></div>
+              <div><Label>Email</Label><Input type="email" value={f.email} onChange={e=>setF({...f, email:e.target.value})} placeholder="user@moroccanspa.in"/></div>
               <div><Label>Full Name</Label><Input value={f.full_name} onChange={e=>setF({...f, full_name:e.target.value})} placeholder="Manager Name"/></div>
               <div><Label>Password</Label><Input type="password" value={f.password} onChange={e=>setF({...f, password:e.target.value})} placeholder="Min 8 chars (temporary credential)"/></div>
               <div>
@@ -1545,8 +1614,8 @@ function App() {
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-background via-card to-muted/20 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-        <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center animate-pulse">
-          <Sparkles className="h-7 w-7 text-white animate-spin" />
+        <div className="h-12 w-12 rounded-xl overflow-hidden animate-pulse">
+          <img src="/logo.png" alt="Loading" className="h-full w-full object-cover animate-spin" style={{ animationDuration: '3s' }} />
         </div>
         <div className="text-sm font-medium tracking-wide">Securing connection to Supabase engine...</div>
       </div>
@@ -1573,7 +1642,7 @@ function App() {
     setAuthToken('')
     setUser(null)
     setProfile(null)
-    toast.info('Logged out from Auréa Spa Business OS')
+    toast.info('Logged out from Moroccan Spa Business OS')
   }
 
   return (
@@ -1582,11 +1651,11 @@ function App() {
       <div className="flex">
         <aside className="w-64 h-screen sticky top-0 border-r border-border/50 bg-card/40 backdrop-blur p-4 flex flex-col">
           <div className="flex items-center gap-2 px-2 py-3">
-            <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-amber-400 to-rose-500 flex items-center justify-center shadow-md shadow-amber-500/20">
-              <Sparkles className="h-5 w-5 text-white"/>
+            <div className="h-9 w-9 rounded-lg overflow-hidden shadow-md shadow-amber-500/20">
+              <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
             </div>
             <div>
-              <div className="font-semibold tracking-tight">Auréa Spa</div>
+              <div className="font-semibold tracking-tight">Moroccan Spa</div>
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Business OS</div>
             </div>
           </div>

@@ -2,7 +2,7 @@ import './globals.css'
 import { Providers } from './providers'
 
 export const metadata = {
-  title: 'Aurea Spa — ERP',
+  title: 'Moroccan Spa — ERP',
   description: 'Multi-centre luxury spa business operating system',
 }
 
