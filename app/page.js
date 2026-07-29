@@ -2184,7 +2184,7 @@ function App() {
   }
 
   return (
-    <div className="app-shell bg-gradient-to-br from-background via-background to-muted/35">
+    <div className="app-shell bg-background">
       <Toaster theme="system" position="top-right" richColors closeButton />
       <div className="flex min-h-[100dvh] md:h-[100dvh]">
         <aside className={`hidden h-[100dvh] shrink-0 border-r border-border/60 bg-card/70 backdrop-blur-xl transition-[width,padding] duration-200 md:sticky md:top-0 md:flex md:flex-col ${sidebarCollapsed?'w-20 p-3':'w-64 p-4'}`}>

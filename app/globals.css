@@ -132,6 +132,18 @@
     width: 100%;
     min-width: 0;
     padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(circle at 12% 8%, rgb(16 185 129 / 0.10), transparent 34rem),
+      radial-gradient(circle at 88% 18%, rgb(59 130 246 / 0.11), transparent 38rem),
+      linear-gradient(145deg, rgb(236 253 245 / 0.28), rgb(239 246 255 / 0.24) 55%, transparent 82%);
+    background-repeat: no-repeat;
+  }
+
+  .dark .app-content {
+    background-image:
+      radial-gradient(circle at 12% 8%, rgb(16 185 129 / 0.07), transparent 34rem),
+      radial-gradient(circle at 88% 18%, rgb(59 130 246 / 0.08), transparent 38rem);
   }
 
   .app-content > .view-surface {
@@ -227,6 +239,10 @@
   }
 
   .app-content .grid[data-kpi-grid="true"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .app-content .grid[data-mobile-columns="2"] {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
