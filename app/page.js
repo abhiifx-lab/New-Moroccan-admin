@@ -83,6 +83,7 @@ const NAV = [
 const BOOKING_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD','MIXED','MEMBERSHIP','GIFT_CARD']
 const SALE_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD']
 const EXPENSE_CATEGORIES = ['Utilities','Supplies','Salaries','Wages','Rent','Marketing','Maintenance','Consumables','Other']
+const ALL_CENTRES = { id: 'ALL', name: 'All Centres' }
 
 // ============================================================================
 // DRILL-DOWN CONTEXT
@@ -478,6 +479,17 @@ function Row({ k, v, bold, onClick }) {
   )
 }
 function Field({ l, children }) { return <div className="space-y-1"><Label className="text-xs text-muted-foreground">{l}</Label>{children}</div> }
+function CollectiveScopeNotice({ feature }) {
+  return (
+    <Card>
+      <CardContent className="py-10 text-center space-y-2">
+        <Building2 className="h-8 w-8 mx-auto text-amber-400"/>
+        <div className="font-semibold">{feature} is managed centre by centre</div>
+        <p className="text-sm text-muted-foreground">Choose a specific centre from Centre Scope to view or change this operational register.</p>
+      </CardContent>
+    </Card>
+  )
+}
 
 // ============================================================================
 // DASHBOARD
@@ -493,7 +505,7 @@ function DashboardView({ centre, refreshTick, onDrill }) {
   }, [centre?.id, date])
   useEffect(() => { load() }, [load, refreshTick])
   const a = data?.agg || data?.single_centre?.agg || data?.consolidated || {}
-  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
+  const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre?.id || 'ALL', date })
 
   return (
     <div className="space-y-6">
@@ -514,6 +526,26 @@ function DashboardView({ centre, refreshTick, onDrill }) {
         <Stat label="Expenses" value={formatINR(a.total_expenses)} hint={`${a.expenses_count||0} entries`} accent="text-rose-500" onClick={()=>drill('total_expenses')}/>
         <Stat label="Cash in Drawer" value={formatINR(a.closing_cash_expected)} hint={`Opening ${formatINR(a.opening_cash)}`} onClick={()=>drill('closing_cash_expected')}/>
       </div>
+
+      {centre?.id === 'ALL' && (
+        <Card>
+          <CardHeader><CardTitle className="text-sm text-muted-foreground">Centre Breakdown</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <Table>
+              <TableHeader><TableRow><TableHead>Centre</TableHead><TableHead className="text-right">Revenue</TableHead><TableHead className="text-right">Expenses</TableHead><TableHead className="text-right">Cash in Drawer</TableHead><TableHead className="text-right">Guests</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {(data?.centres || []).map(item => <TableRow key={item.centre.id}>
+                  <TableCell className="font-medium">{item.centre.name}</TableCell>
+                  <TableCell className="text-right">{formatINR(item.agg?.total_revenue)}</TableCell>
+                  <TableCell className="text-right text-rose-500">{formatINR(item.agg?.total_expenses)}</TableCell>
+                  <TableCell className="text-right">{formatINR(item.agg?.closing_cash_expected)}</TableCell>
+                  <TableCell className="text-right">{item.agg?.guests || 0}</TableCell>
+                </TableRow>)}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Sales Mix</CardTitle></CardHeader>
@@ -560,10 +592,12 @@ function DashboardView({ centre, refreshTick, onDrill }) {
 // ============================================================================
 // BOOKING
 // ============================================================================
-function BookingView({ centre, role, bump, onDrill, refreshTick }) {
+function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
   const [services, setServices] = useState([])
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id
   const [f, setF] = useState({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi_1:'', mix_upi_2:'', mix_card:'', redemption_ref:'' })
   const load = async () => {
     const [s, e] = await Promise.all([apiGet('/services'), apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=BOOKING`)])
@@ -594,7 +628,7 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Bookings</h2><p className="text-sm text-muted-foreground">Every booking creates one immutable event. Click any row for full detail + reverse.</p></div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>New Booking</Button></DialogTrigger>
           <DialogContent className="max-w-lg">
             <DialogHeader><DialogTitle>New Booking — {centre.name}</DialogTitle></DialogHeader>
@@ -630,17 +664,18 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
             )}
             <DialogFooter><Button onClick={submit}>Record Booking</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
 
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Time</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
+            {events.length===0 && <TableRow><TableCell colSpan={isAllCentres?8:7} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
             {events.map(e=>(
               <TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({ type:'event', eventId:e.id })}>
                 <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
+                {isAllCentres && <TableCell className="text-xs">{centreName(e.centre_id)}</TableCell>}
                 <TableCell>{e.customer}</TableCell><TableCell>{e.service_name}</TableCell><TableCell>{e.therapist}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{e.payment_method}</Badge>
@@ -661,16 +696,18 @@ function BookingView({ centre, role, bump, onDrill, refreshTick }) {
 // ============================================================================
 // MEMBERSHIP / GIFT CARD / EXPENSE / CASH MOVEMENT (same as before, with drill)
 // ============================================================================
-function MembershipView({ centre, role, bump, refreshTick }) {
+function MembershipView({ centre, centres, role, bump, refreshTick }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id
   const [f, setF] = useState({ customer:'', phone:'', amount:'', payment_method:'CASH' })
   const load = async () => {
-    const data = await apiGet('/memberships')
+    const data = await apiGet(`/memberships?centre_id=${centre.id}`)
     setList(Array.isArray(data) ? data : [])
     if (!Array.isArray(data)) toast.error(data?.error || 'Unable to load memberships')
   }
-  useEffect(()=>{load()},[refreshTick])
+  useEffect(()=>{load()},[centre?.id, refreshTick])
   const submit = async () => {
     const value = toPaise(f.amount)
     const r = await apiPost('/events/membership', {
@@ -689,7 +726,7 @@ function MembershipView({ centre, role, bump, refreshTick }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Memberships</h2><p className="text-sm text-muted-foreground">Sale = revenue + liability. Redemption = operational usage only.</p></div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Sell Membership</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>Sell Membership — {centre.name}</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-3">
@@ -701,15 +738,16 @@ function MembershipView({ centre, role, bump, refreshTick }) {
             </div>
             <DialogFooter><Button onClick={submit}>Sell</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Customer</TableHead><TableHead>Sold At</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Redemptions</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Code</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Customer</TableHead><TableHead>Sold At</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Redemptions</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
           <TableBody>
-            {list.length===0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-6">No memberships</TableCell></TableRow>}
+            {list.length===0 && <TableRow><TableCell colSpan={isAllCentres?8:7} className="text-center text-muted-foreground py-6">No memberships</TableCell></TableRow>}
             {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
               <TableCell className="font-mono text-xs">{m.code}</TableCell>
+              {isAllCentres && <TableCell className="text-xs">{centreName(m.sold_at_centre_id)}</TableCell>}
               <TableCell>{m.buyer || m.customer}</TableCell>
               <TableCell className="text-xs">{m.sold_at_date || m.sold_business_date}</TableCell>
               <TableCell className="text-right">{formatINR(liabilityInitialPaise(m))}</TableCell>
@@ -724,16 +762,18 @@ function MembershipView({ centre, role, bump, refreshTick }) {
   )
 }
 
-function GiftCardView({ centre, role, bump, refreshTick }) {
+function GiftCardView({ centre, centres, role, bump, refreshTick }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id
   const [f, setF] = useState({ customer:'', recipient:'', amount:'', payment_method:'CASH' })
   const load = async () => {
-    const data = await apiGet('/gift-cards')
+    const data = await apiGet(`/gift-cards?centre_id=${centre.id}`)
     setList(Array.isArray(data) ? data : [])
     if (!Array.isArray(data)) toast.error(data?.error || 'Unable to load gift cards')
   }
-  useEffect(()=>{load()},[refreshTick])
+  useEffect(()=>{load()},[centre?.id, refreshTick])
   const submit = async () => {
     const value = toPaise(f.amount)
     const r = await apiPost('/events/gift-card', {
@@ -751,7 +791,7 @@ function GiftCardView({ centre, role, bump, refreshTick }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Gift Cards</h2><p className="text-sm text-muted-foreground">Selling centre keeps revenue. Redemption is operational only.</p></div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Sell Gift Card</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>Sell Gift Card — {centre.name}</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-3">
@@ -763,15 +803,15 @@ function GiftCardView({ centre, role, bump, refreshTick }) {
             </div>
             <DialogFooter><Button onClick={submit}>Sell</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Code</TableHead><TableHead>Buyer</TableHead><TableHead>Recipient</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Code</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Buyer</TableHead><TableHead>Recipient</TableHead><TableHead className="text-right">Initial</TableHead><TableHead className="text-right">Balance</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
           <TableBody>
-            {list.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No gift cards</TableCell></TableRow>}
+            {list.length===0 && <TableRow><TableCell colSpan={isAllCentres?7:6} className="text-center text-muted-foreground py-6">No gift cards</TableCell></TableRow>}
             {list.map(m=>(<TableRow key={m.code} className={m.reversed?'opacity-60':''}>
-              <TableCell className="font-mono text-xs">{m.code}</TableCell><TableCell>{m.buyer}</TableCell><TableCell>{m.recipient}</TableCell>
+              <TableCell className="font-mono text-xs">{m.code}</TableCell>{isAllCentres && <TableCell className="text-xs">{centreName(m.sold_at_centre_id)}</TableCell>}<TableCell>{m.buyer}</TableCell><TableCell>{m.recipient}</TableCell>
               <TableCell className="text-right">{formatINR(liabilityInitialPaise(m))}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(m.remaining_paise)}</TableCell>
               <TableCell>{m.reversed ? <Badge variant="destructive">REVERSED</Badge> : <Badge variant="secondary">ACTIVE</Badge>}</TableCell>
@@ -783,9 +823,11 @@ function GiftCardView({ centre, role, bump, refreshTick }) {
   )
 }
 
-function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
+function ExpenseView({ centre, centres, role, bump, onDrill, refreshTick }) {
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id
   const [f, setF] = useState({ amount:'', payment_method:'CASH', category:'Utilities', vendor:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=EXPENSE`))
   useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
@@ -799,7 +841,7 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Expenses</h2><p className="text-sm text-muted-foreground">Reduces cash or bank depending on payment method.</p></div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Add Expense</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>New Expense — {centre.name}</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-3">
@@ -813,14 +855,15 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
             <Field l="Notes"><Textarea value={f.notes} onChange={e=>setF({...f, notes:e.target.value})}/></Field>
             <DialogFooter><Button onClick={submit}>Save</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Category</TableHead><TableHead>Vendor</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Category</TableHead><TableHead>Vendor</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No expenses today</TableCell></TableRow>}
+            {events.length===0 && <TableRow><TableCell colSpan={isAllCentres?7:6} className="text-center text-muted-foreground py-6">No expenses today</TableCell></TableRow>}
             {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
+              {isAllCentres && <TableCell className="text-xs">{centreName(e.centre_id)}</TableCell>}
               <TableCell>{e.category}</TableCell><TableCell>{e.vendor}</TableCell>
               <TableCell><Badge variant="secondary">{e.payment_method}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-right font-medium text-rose-500">{formatINR(e.amount)}</TableCell>
@@ -835,6 +878,8 @@ function ExpenseView({ centre, role, bump, onDrill, refreshTick }) {
 function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick }) {
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id
   const [f, setF] = useState({ amount:'', movement_type:'BANK_DEPOSIT', counterparty_centre_id:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=CASH_MOVEMENT`))
   useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
@@ -848,7 +893,7 @@ function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick })
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div><h2 className="text-2xl font-semibold">Cash Movement</h2><p className="text-sm text-muted-foreground">Never revenue. Never expense. Only cash position.</p></div>
-        <Dialog open={open} onOpenChange={setOpen}>
+        {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>Record Movement</Button></DialogTrigger>
           <DialogContent><DialogHeader><DialogTitle>Cash Movement — {centre.name}</DialogTitle></DialogHeader>
             <div className="grid grid-cols-2 gap-3">
@@ -863,14 +908,15 @@ function CashMovementView({ centre, centres, role, bump, onDrill, refreshTick })
             <Field l="Notes"><Textarea value={f.notes} onChange={e=>setF({...f, notes:e.target.value})}/></Field>
             <DialogFooter><Button onClick={submit}>Save</Button></DialogFooter>
           </DialogContent>
-        </Dialog>
+        </Dialog>}
       </div>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Type</TableHead><TableHead>Notes</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Type</TableHead><TableHead>Notes</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-6">No cash movements today</TableCell></TableRow>}
+            {events.length===0 && <TableRow><TableCell colSpan={isAllCentres?6:5} className="text-center text-muted-foreground py-6">No cash movements today</TableCell></TableRow>}
             {events.map(e=>(<TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({type:'event', eventId:e.id})}>
               <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
+              {isAllCentres && <TableCell className="text-xs">{centreName(e.centre_id)}</TableCell>}
               <TableCell><Badge>{e.movement_type.replace(/_/g,' ')}</Badge>{e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}{reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}</TableCell>
               <TableCell className="text-xs">{e.notes}</TableCell>
               <TableCell className="text-right font-medium">{formatINR(e.amount)}</TableCell>
@@ -1012,10 +1058,14 @@ function RegisterView({ centre, onDrill, refreshTick }) {
 function CashBookView({ centre, onDrill, refreshTick }) {
   const [data, setData] = useState(null)
   const [date, setDate] = useState(todayStr())
-  const load = useCallback(async () => { setData(await apiGet(`/cash-book?centre_id=${centre.id}&date=${date}`)) }, [centre?.id, date])
+  const load = useCallback(async () => {
+    if (centre?.id === 'ALL') { setData(null); return }
+    setData(await apiGet(`/cash-book?centre_id=${centre.id}&date=${date}`))
+  }, [centre?.id, date])
   useEffect(()=>{ if(centre?.id) load()}, [load, refreshTick])
   const lines = data?.lines || []
   const agg = data?.agg || {}
+  if (centre?.id === 'ALL') return <CollectiveScopeNotice feature="Cash Book" />
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1055,6 +1105,7 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
   const [openingInput, setOpeningInput] = useState('')
   const [date, setDate] = useState(todayStr())
   const load = useCallback(async () => {
+    if (centre?.id === 'ALL') { setBd(null); setDash(null); return }
     const b = await apiGet(`/business-day?centre_id=${centre.id}&date=${date}`)
     setBd(b); setOpeningInput(((b?.opening_cash||0)/100).toString())
     setDash(await apiGet(`/dashboard?centre_id=${centre.id}&date=${date}`))
@@ -1078,6 +1129,7 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
   }
   const agg = dash?.agg || dash?.single_centre?.agg || dash?.consolidated || {}
   const drill = (metric) => onDrill({ type:'metric', metric, centre_id: centre.id, date })
+  if (centre?.id === 'ALL') return <CollectiveScopeNotice feature="Business Day closing" />
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -1142,19 +1194,22 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
 // ============================================================================
 // AUDIT LOG (with links to events)
 // ============================================================================
-function AuditView({ onDrill, refreshTick }) {
+function AuditView({ centre, centres, onDrill, refreshTick }) {
   const [log, setLog] = useState([])
-  useEffect(()=>{ apiGet('/audit-log').then(setLog) },[refreshTick])
+  const isAllCentres = centre?.id === 'ALL'
+  const centreName = (id) => centres.find(c => c.id === id)?.name || id || 'System'
+  useEffect(()=>{ apiGet(`/audit-log?centre_id=${centre.id}`).then(data => setLog(Array.isArray(data) ? data : [])) },[centre?.id, refreshTick])
   return (
     <div className="space-y-4">
       <h2 className="text-2xl font-semibold">Audit Log</h2>
       <p className="text-sm text-muted-foreground">Immutable history. Click any row with an event to open its detail.</p>
       <Card><CardContent className="p-0">
-        <Table><TableHeader><TableRow><TableHead>Time</TableHead><TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>Role</TableHead><TableHead>Details</TableHead><TableHead></TableHead></TableRow></TableHeader>
+        <Table><TableHeader><TableRow><TableHead>Time</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Action</TableHead><TableHead>Actor</TableHead><TableHead>Role</TableHead><TableHead>Details</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {log.length===0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-6">No audit entries yet</TableCell></TableRow>}
+            {log.length===0 && <TableRow><TableCell colSpan={isAllCentres?7:6} className="text-center text-muted-foreground py-6">No audit entries yet</TableCell></TableRow>}
             {log.map(l=>(<TableRow key={l.id} className={l.target_event_id?'cursor-pointer hover:bg-muted/50':''} onClick={()=>l.target_event_id && onDrill({type:'event', eventId:l.target_event_id})}>
               <TableCell className="text-xs">{new Date(l.created_at).toLocaleString('en-IN')}</TableCell>
+              {isAllCentres && <TableCell className="text-xs">{centreName(l.centre_id)}</TableCell>}
               <TableCell><Badge variant={l.action==='REVERSE_EVENT'?'destructive':'default'}>{l.action}</Badge></TableCell>
               <TableCell>{l.actor}</TableCell><TableCell>{l.role}</TableCell>
               <TableCell className="text-xs text-muted-foreground">{l.reason || JSON.stringify(l.new_value||{})}</TableCell>
@@ -1177,7 +1232,9 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
 
-  const centreId = centreFilter === 'ALL' ? 'ALL' : centre.id
+  useEffect(() => { setCentreFilter(centre?.id === 'ALL' ? 'ALL' : 'CURRENT') }, [centre?.id])
+  const centreId = centre?.id === 'ALL' || centreFilter === 'ALL' ? 'ALL' : centre.id
+  const allSelected = centreId === 'ALL'
   const load = useCallback(async () => {
     setLoading(true)
     const r = await apiGet(`/reports/pl?centre_id=${centreId}&from=${from}&to=${to}&group=${group}`)
@@ -1219,10 +1276,10 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
               <SelectItem value="year">Yearly</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={centreFilter} onValueChange={setCentreFilter}>
+          <Select value={allSelected?'ALL':centreFilter} onValueChange={setCentreFilter}>
             <SelectTrigger className="w-[180px]"><SelectValue/></SelectTrigger>
             <SelectContent>
-              <SelectItem value="CURRENT">{centre.name} only</SelectItem>
+              {centre?.id !== 'ALL' && <SelectItem value="CURRENT">{centre.name} only</SelectItem>}
               {role === 'SUPER' && <SelectItem value="ALL">All Centres (consolidated)</SelectItem>}
             </SelectContent>
           </Select>
@@ -1295,7 +1352,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
       </Card>
 
       {/* Per-centre breakdown (only when ALL selected) */}
-      {centreFilter === 'ALL' && perCentre.length > 0 && (
+      {allSelected && perCentre.length > 0 && (
         <Card><CardHeader><CardTitle className="text-sm text-muted-foreground">Per-Centre Totals</CardTitle></CardHeader>
           <CardContent className="p-0">
             <Table>
@@ -1348,7 +1405,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
           <Table>
             <TableHeader><TableRow>
               <TableHead>Period</TableHead>
-              {centreFilter === 'ALL' && <TableHead>Centre</TableHead>}
+              {allSelected && <TableHead>Centre</TableHead>}
               <TableHead className="text-right">Gross Rev</TableHead>
               <TableHead className="text-right">Reversals</TableHead>
               <TableHead className="text-right">Net Rev</TableHead>
@@ -1362,7 +1419,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
             </TableRow></TableHeader>
             <TableBody>
               {(data?.rows || []).flatMap(row => {
-                if (centreFilter === 'ALL') {
+                if (allSelected) {
                   const lines = row.per_centre.map(c => (
                     <TableRow key={row.period + '-' + c.centre_id}>
                       <TableCell className="text-xs">{row.period}</TableCell>
@@ -1417,7 +1474,7 @@ function ReportsView({ centre, centres, onDrill, refreshTick, role }) {
                 }
               })}
               {(!data?.rows || data.rows.length === 0) && (
-                <TableRow><TableCell colSpan={centreFilter==='ALL'?12:11} className="text-center text-muted-foreground py-6">No data in range</TableCell></TableRow>
+                <TableRow><TableCell colSpan={allSelected?12:11} className="text-center text-muted-foreground py-6">No data in range</TableCell></TableRow>
               )}
             </TableBody>
           </Table>
@@ -1628,7 +1685,7 @@ function App() {
           setCentre(scoped[0] || list[0] || null)
         } else {
           setCentres(list)
-          setCentre(list[0] || null)
+          setCentre(ALL_CENTRES)
         }
       }
     } else {
@@ -1711,9 +1768,10 @@ function App() {
           <div className="mt-4 space-y-1">
             <Label className="text-[10px] uppercase tracking-widest text-muted-foreground px-2">Centre Scope</Label>
             {profile.role === 'SUPER_ADMIN' ? (
-              <Select value={centre.id} onValueChange={v=>setCentre(centres.find(c=>c.id===v))}>
+              <Select value={centre.id} onValueChange={v=>setCentre(v === 'ALL' ? ALL_CENTRES : centres.find(c=>c.id===v))}>
                 <SelectTrigger className="bg-background/60"><SelectValue/></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="ALL"><Building2 className="h-3 w-3 inline mr-1 text-amber-400"/>All Centres (Collective)</SelectItem>
                   {centres.map(c=><SelectItem key={c.id} value={c.id}><Building2 className="h-3 w-3 inline mr-1 text-amber-400"/>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
