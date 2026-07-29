@@ -1076,10 +1076,12 @@ function CloseView({ centre, role, bump, onDrill, refreshTick }) {
             <Row k="+ Cash Sales" v={formatINR(agg.cash_sales)} onClick={()=>drill('cash_sales')}/>
             <Row k="+ Transfer In" v={formatINR(agg.cash_transfer_in)} onClick={()=>drill('cash_transfer_in')}/>
             <Row k="+ Float Added" v={formatINR(agg.float_added)} onClick={()=>drill('float_added')}/>
+            <Row k="+ Cash Received" v={formatINR(agg.other_cash_in)} onClick={()=>drill('other_cash_in')}/>
             <Row k="− Cash Expenses" v={formatINR(agg.cash_expenses)} onClick={()=>drill('cash_expenses')}/>
             <Row k="− Deposits" v={formatINR(agg.cash_deposited)} onClick={()=>drill('cash_deposited')}/>
             <Row k="− Withdrawals" v={formatINR(agg.cash_withdrawn)} onClick={()=>drill('cash_withdrawn')}/>
             <Row k="− Transfer Out" v={formatINR(agg.cash_transfer_out)} onClick={()=>drill('cash_transfer_out')}/>
+            <Row k="− Cash Handed Over" v={formatINR(agg.other_cash_out)} onClick={()=>drill('other_cash_out')}/>
             <div className="border-t border-border/50 col-span-2"></div>
             <Row k="Expected Closing Cash" v={formatINR(agg.closing_cash_expected)} bold onClick={()=>drill('closing_cash_expected')}/>
           </div>
