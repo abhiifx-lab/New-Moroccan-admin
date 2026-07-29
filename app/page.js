@@ -89,6 +89,7 @@ const NAV = [
   { id: 'cashbook',    label: 'Cash Book',       icon: Wallet },
   { id: 'close',       label: 'Business Day',    icon: Lock },
   { id: 'reports',     label: 'Reports',         icon: FileText },
+  { id: 'therapists',  label: 'Therapists',      icon: User2 },
   { id: 'audit',       label: 'Audit Log',       icon: ShieldCheck },
 ]
 
@@ -1798,6 +1799,81 @@ function UsersView({ centres, bump, refreshTick }) {
   )
 }
 
+function TherapistsView({ centre, centres, bump, refreshTick }) {
+  const [therapists, setTherapists] = useState([])
+  const [name, setName] = useState('')
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    const data = await apiGet(`/therapists?centre_id=${centre.id}`)
+    if (Array.isArray(data)) setTherapists(data)
+    else if (data?.error) toast.error(data.error)
+  }, [centre.id])
+
+  useEffect(() => { load() }, [load, refreshTick])
+
+  const create = async () => {
+    const cleanName = name.trim()
+    if (centre.id === 'ALL') return toast.error('Select a specific centre first')
+    if (cleanName.length < 2) return toast.error('Enter the therapist name')
+    setLoading(true)
+    const result = await apiPost('/therapists', { name: cleanName, centre_id: centre.id })
+    setLoading(false)
+    if (result.error) return toast.error(result.error)
+    toast.success(`${cleanName} added to ${centre.name}`)
+    setName(''); setOpen(false); bump(); await load()
+  }
+
+  const toggle = async (therapist) => {
+    const result = await apiPatch(`/therapists/${therapist.id}`, { active: !therapist.active })
+    if (result.error) return toast.error(result.error)
+    toast.success(`${therapist.name} is now ${therapist.active ? 'inactive' : 'active'}`)
+    bump(); await load()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-semibold">Therapists</h2>
+          <p className="text-sm text-muted-foreground">Manage the therapists available for appointment assignment.</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild><Button disabled={centre.id === 'ALL'}><Plus className="h-4 w-4 mr-2"/>Add Therapist</Button></DialogTrigger>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader><DialogTitle>Add Therapist</DialogTitle><DialogDescription>The therapist will be available only at {centre.name}.</DialogDescription></DialogHeader>
+            <div className="py-2"><Label>Therapist Name</Label><Input autoFocus value={name} onChange={e=>setName(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter') create() }} placeholder="Enter full name"/></div>
+            <DialogFooter><Button variant="outline" onClick={()=>setOpen(false)}>Cancel</Button><Button onClick={create} disabled={loading}>{loading?'Adding...':'Add Therapist'}</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {centre.id === 'ALL' && <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">Select a specific centre to add a therapist. The collective view is for reviewing all therapists.</div>}
+
+      <Card className="border-border/50 shadow-sm">
+        <CardContent className="pt-6">
+          <Table>
+            <TableHeader><TableRow><TableHead>Name</TableHead>{centre.id === 'ALL' && <TableHead>Centre</TableHead>}<TableHead>Status</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Action</TableHead></TableRow></TableHeader>
+            <TableBody>
+              {therapists.length === 0 && <TableRow><TableCell colSpan={centre.id === 'ALL' ? 5 : 4} className="text-center text-muted-foreground py-10">No therapists found.</TableCell></TableRow>}
+              {therapists.map(therapist => (
+                <TableRow key={therapist.id}>
+                  <TableCell className="font-medium">{therapist.name}</TableCell>
+                  {centre.id === 'ALL' && <TableCell>{centres.find(c=>c.id===therapist.centre_id)?.name || 'Unknown centre'}</TableCell>}
+                  <TableCell><Badge className={therapist.active?'bg-emerald-500/20 text-emerald-400':'bg-muted text-muted-foreground'}>{therapist.active?'Active':'Inactive'}</Badge></TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{new Date(therapist.created_at).toLocaleDateString('en-IN')}</TableCell>
+                  <TableCell className="text-right"><Button size="sm" variant="outline" onClick={()=>toggle(therapist)}>{therapist.active?'Deactivate':'Activate'}</Button></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
 // ============================================================================
 // SHELL
 // ============================================================================
@@ -1960,6 +2036,7 @@ function App() {
           {view==='cashbook'   && <CashBookView {...props} />}
           {view==='close'      && <CloseView {...props} />}
           {view==='reports'    && <ReportsView {...props} />}
+          {view==='therapists' && <TherapistsView {...props} />}
           {view==='audit'      && <AuditView {...props} />}
           {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
         </main>
