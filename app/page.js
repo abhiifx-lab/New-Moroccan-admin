@@ -21,7 +21,7 @@ import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
   Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
-  Download, FileSpreadsheet, Menu, Trash2
+  Download, FileSpreadsheet, Menu, Trash2, Settings
 } from 'lucide-react'
 
 const DashboardMissionControl = dynamic(
@@ -673,11 +673,11 @@ function LegacyDashboardView({ centre, refreshTick, onDrill }) {
   )
 }
 
-function DashboardView({ centre, profile, refreshTick, onDrill, onNavigateAction }) {
+function DashboardView({ centre, profile, refreshTick, onDrill, onNavigateAction, onProfileAction }) {
   if (process.env.NEXT_PUBLIC_LEGACY_DASHBOARD === '1') {
     return <LegacyDashboardView centre={centre} refreshTick={refreshTick} onDrill={onDrill}/>
   }
-  return <DashboardMissionControl {...{ centre, profile, refreshTick, onDrill, onNavigateAction, apiGet, formatMoney:formatINR }} today={todayStr()}/>
+  return <DashboardMissionControl {...{ centre, profile, refreshTick, onDrill, onNavigateAction, onProfileAction, apiGet, formatMoney:formatINR }} today={todayStr()}/>
 }
 
 // ============================================================================
@@ -1981,7 +1981,43 @@ function TherapistsView({ centre, centres, bump, refreshTick }) {
   )
 }
 
-function NavigationPanel({ profile, centre, centres, navItems, view, setView, setCentre, onLogout, onNavigate }) {
+function AppProfileMenu({ profile, centre, onAction, className='' }) {
+  const isSuperAdmin = profile.role === 'SUPER_ADMIN'
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className={`shrink-0 rounded-xl border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 ${className}`}><User2 className="h-4 w-4"/></Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64 rounded-xl p-2">
+        <DropdownMenuLabel><div className="truncate">{profile.full_name || profile.email}</div><div className="mt-1 truncate text-xs font-normal text-muted-foreground">{isSuperAdmin?'Super Admin':'Centre User'} · {centre.name}</div></DropdownMenuLabel>
+        <DropdownMenuSeparator/>
+        <DropdownMenuItem onClick={()=>onAction('settings')}><Settings className="mr-2 h-4 w-4"/>Settings</DropdownMenuItem>
+        {isSuperAdmin && <DropdownMenuItem onClick={()=>onAction('users')}><Users className="mr-2 h-4 w-4"/>User Management</DropdownMenuItem>}
+        <DropdownMenuItem onClick={()=>onAction('audit')}><ShieldCheck className="mr-2 h-4 w-4"/>Audit Log</DropdownMenuItem>
+        <DropdownMenuSeparator/>
+        <DropdownMenuItem onClick={()=>onAction('logout')} className="text-rose-600 focus:bg-rose-50 focus:text-rose-700"><LogOut className="mr-2 h-4 w-4"/>Log Out</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function SettingsView({ profile, centre, onNavigate }) {
+  return (
+    <div className="space-y-6">
+      <div><h2 className="text-2xl font-semibold">Settings</h2><p className="text-sm text-muted-foreground">Your account, access level, and centre context.</p></div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card><CardHeader><CardTitle className="text-base">Account</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">
+          <Row k="Name" v={profile.full_name || '—'}/><Row k="Email" v={profile.email}/><Row k="Role" v={profile.role === 'SUPER_ADMIN' ? 'Super Admin' : 'Centre User'}/><Row k="Current Centre" v={centre.name}/>
+        </CardContent></Card>
+        <Card><CardHeader><CardTitle className="text-base">Access &amp; Security</CardTitle></CardHeader><CardContent className="space-y-3">
+          <Button variant="outline" className="w-full justify-start" onClick={()=>onNavigate('audit')}><ShieldCheck className="mr-2 h-4 w-4"/>Open Audit Log</Button>
+          {profile.role === 'SUPER_ADMIN' && <Button variant="outline" className="w-full justify-start" onClick={()=>onNavigate('users')}><Users className="mr-2 h-4 w-4"/>Manage Users</Button>}
+          <p className="text-xs leading-relaxed text-muted-foreground">Passwords and authentication remain protected by Supabase Auth. Use the profile menu to sign out securely.</p>
+        </CardContent></Card>
+      </div>
+    </div>
+  )
+}
+
+function NavigationPanel({ profile, centre, centres, navItems, view, setView, setCentre, onNavigate }) {
   const navigate = (nextView) => {
     setView(nextView)
     onNavigate?.()
@@ -1999,16 +2035,13 @@ function NavigationPanel({ profile, centre, centres, navItems, view, setView, se
         </div>
       </div>
 
-      <div className="mt-4 flex items-center justify-between gap-2 rounded-xl border border-border/60 bg-muted/35 p-3">
-        <div className="min-w-0 flex-1">
+      <div className="mt-4 rounded-xl border border-border/60 bg-muted/35 p-3">
+        <div className="min-w-0">
           <div className="truncate text-xs font-semibold text-foreground">{profile.full_name || profile.email}</div>
           <Badge className="mt-1 border border-amber-500/30 bg-amber-500/15 px-1.5 py-0 font-mono text-[10px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-300">
             {profile.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'CENTRE USER'}
           </Badge>
         </div>
-        <Button variant="ghost" size="icon" aria-label="Log out" title="Logout" onClick={onLogout} className="shrink-0 hover:bg-rose-500/15 hover:text-rose-500">
-          <LogOut className="h-4 w-4" />
-        </Button>
       </div>
 
       <div className="mt-4 space-y-1.5">
@@ -2116,7 +2149,15 @@ function App() {
     ...(profile.role === 'SUPER_ADMIN' ? [{ id: 'users', label: 'User Management', icon: Users }] : [])
   ]
 
-  const Icon = navItems.find(n=>n.id===view)?.icon || LayoutDashboard
+  const handleLogout = async () => {
+    await apiPost('/auth/logout', {})
+    setAuthToken('')
+    setUser(null)
+    setProfile(null)
+    toast.info('Logged out from Moroccan Spa Business OS')
+  }
+  const currentView = navItems.find(n=>n.id===view) || (view === 'settings' ? { id:'settings', label:'Settings', icon:Settings } : { id:view, label:'Dashboard', icon:LayoutDashboard })
+  const Icon = currentView.icon
   const handleDashboardAction = (action) => {
     const target = {
       'view-bookings':'booking', 'new-booking':'booking', 'walk-in':'booking', expense:'expense',
@@ -2127,17 +2168,15 @@ function App() {
     else setPendingAction(null)
     setView(target)
   }
+  const handleProfileAction = (action) => {
+    if (action === 'logout') return handleLogout()
+    const target = { settings:'settings', users:'users', audit:'audit' }[action]
+    if (target === 'users' && profile.role !== 'SUPER_ADMIN') return
+    if (target) setView(target)
+  }
   const props = {
     centre, centres, role, profile, bump: () => setBump(b=>b+1), refreshTick:bump, onDrill,
-    onNavigateAction:handleDashboardAction, pendingAction, onActionConsumed:consumeDashboardAction
-  }
-
-  const handleLogout = async () => {
-    await apiPost('/auth/logout', {})
-    setAuthToken('')
-    setUser(null)
-    setProfile(null)
-    toast.info('Logged out from Moroccan Spa Business OS')
+    onNavigateAction:handleDashboardAction, onProfileAction:handleProfileAction, pendingAction, onActionConsumed:consumeDashboardAction
   }
 
   return (
@@ -2145,13 +2184,13 @@ function App() {
       <Toaster theme="system" position="top-right" richColors closeButton />
       <div className="flex min-h-[100dvh] lg:h-[100dvh]">
         <aside className="hidden h-[100dvh] w-64 shrink-0 border-r border-border/60 bg-card/70 p-4 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:flex-col">
-          <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} onLogout={handleLogout}/>
+          <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }}/>
         </aside>
 
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
           <SheetContent side="left" className="safe-top safe-bottom w-[88vw] max-w-[340px] overflow-hidden p-4">
             <SheetHeader className="sr-only"><SheetTitle>Application navigation</SheetTitle><SheetDescription>Choose a centre or section.</SheetDescription></SheetHeader>
-            <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} onLogout={handleLogout} onNavigate={()=>setMobileNavOpen(false)}/>
+            <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} onNavigate={()=>setMobileNavOpen(false)}/>
           </SheetContent>
         </Sheet>
 
@@ -2160,22 +2199,21 @@ function App() {
             <div className="flex h-16 items-center gap-3 px-4">
               <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={()=>setMobileNavOpen(true)} className="shrink-0"><Menu className="h-5 w-5"/></Button>
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-semibold">{navItems.find(n=>n.id===view)?.label}</div>
+                <div className="truncate text-sm font-semibold">{currentView.label}</div>
                 <div className="flex items-center gap-1 truncate text-xs text-muted-foreground"><Building2 className="h-3 w-3 shrink-0"/><span className="truncate">{centre.name}</span></div>
               </div>
-              {profile.role === 'SUPER_ADMIN' ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon" aria-label={`Change centre. Current centre: ${centre.name}`} title="Change centre" className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"><Building2 className="h-4 w-4"/></Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuItem onClick={()=>setCentre(ALL_CENTRES)} className={centre.id === 'ALL' ? 'bg-muted font-semibold' : ''}><Building2 className="mr-2 h-4 w-4 text-amber-500"/>All Centres (Collective)</DropdownMenuItem>
-                    {centres.map(c=><DropdownMenuItem key={c.id} onClick={()=>setCentre(c)} className={centre.id === c.id ? 'bg-muted font-semibold' : ''}><MapPin className="mr-2 h-4 w-4 text-amber-500"/>{c.name}</DropdownMenuItem>)}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg"><img src="/logo.png" alt="" className="h-full w-full object-cover"/></div>
-              )}
+              <div className="flex shrink-0 items-center gap-2">
+                {profile.role === 'SUPER_ADMIN' && <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon" aria-label={`Change centre. Current centre: ${centre.name}`} title="Change centre" className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"><Building2 className="h-4 w-4"/></Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuItem onClick={()=>setCentre(ALL_CENTRES)} className={centre.id === 'ALL' ? 'bg-muted font-semibold' : ''}><Building2 className="mr-2 h-4 w-4 text-amber-500"/>All Centres (Collective)</DropdownMenuItem>
+                      {centres.map(c=><DropdownMenuItem key={c.id} onClick={()=>setCentre(c)} className={centre.id === c.id ? 'bg-muted font-semibold' : ''}><MapPin className="mr-2 h-4 w-4 text-amber-500"/>{c.name}</DropdownMenuItem>)}
+                    </DropdownMenuContent>
+                  </DropdownMenu>}
+                <AppProfileMenu {...{profile,centre}} onAction={handleProfileAction}/>
+              </div>
             </div>
           </header>
 
@@ -2183,12 +2221,13 @@ function App() {
             <div className="mx-auto w-full max-w-[1600px]">
               <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground lg:flex">
                 <Icon className="h-4 w-4 text-amber-500"/>
-                <span className="font-semibold text-foreground">{navItems.find(n=>n.id===view)?.label}</span>
+                <span className="font-semibold text-foreground">{currentView.label}</span>
                 <span className="mx-1.5 text-border">/</span>
                 <span className="flex min-w-0 items-center gap-1"><Building2 className="h-3.5 w-3.5 shrink-0"/><span className="truncate">{centre.name}</span></span>
                 <span className="ml-auto rounded-lg border border-border/40 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
                   {new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}
                 </span>
+                {view !== 'dashboard' && <AppProfileMenu {...{profile,centre}} onAction={handleProfileAction} className="ml-2"/>}
               </div>
 
               <div key={`${view}-${centre.id}`} className="view-surface">
@@ -2205,6 +2244,7 @@ function App() {
                 {view==='therapists' && <TherapistsView {...props} />}
                 {view==='audit'      && <AuditView {...props} />}
                 {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} currentUserId={user.id} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
+                {view==='settings'   && <SettingsView {...{profile,centre}} onNavigate={setView}/>}
               </div>
             </div>
           </main>

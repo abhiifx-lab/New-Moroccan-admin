@@ -7,8 +7,8 @@ import {
 } from 'recharts'
 import {
   ArrowRight, Bell, BookOpen, CalendarDays, CalendarPlus, CreditCard, Expand,
-  Gift, IndianRupee, LockKeyhole, Receipt, Sparkles, TrendingDown, TrendingUp,
-  UserRound, UsersRound, WalletCards,
+  Gift, IndianRupee, LockKeyhole, LogOut, Receipt, Settings, ShieldCheck, Sparkles,
+  TrendingDown, TrendingUp, UserRound, UsersRound, WalletCards,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -139,7 +139,7 @@ function QuickAction({ icon:Icon, label, tone, onClick }) {
   return <button type="button" onClick={onClick} className="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-3 text-center text-xs font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className={`flex h-10 w-10 items-center justify-center rounded-2xl transition group-hover:scale-105 ${tones[tone]}`}><Icon className="h-5 w-5"/></span>{label}</button>
 }
 
-export function DashboardMissionControl({ centre, profile, refreshTick, onDrill, onNavigateAction, apiGet, formatMoney, today }) {
+export function DashboardMissionControl({ centre, profile, refreshTick, onDrill, onNavigateAction, onProfileAction, apiGet, formatMoney, today }) {
   const [date, setDate] = useState(today)
   const [daily, setDaily] = useState(null)
   const [previousDaily, setPreviousDaily] = useState(null)
@@ -268,7 +268,18 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
           <div className="relative min-w-0 flex-1 sm:flex-none"><CalendarDays className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-violet-500"/><Input aria-label="Dashboard business date" type="date" value={date} onChange={event=>setDate(event.target.value)} className="h-11 w-full rounded-2xl border-white bg-white/90 pl-10 pr-3 shadow-sm sm:w-[170px]"/></div>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Notifications" className="h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm"><Bell className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-72"><DropdownMenuLabel>Notifications</DropdownMenuLabel><DropdownMenuSeparator/><div className="px-3 py-5 text-center text-sm text-muted-foreground">No new notifications</div></DropdownMenuContent></DropdownMenu>
           <Button variant="outline" size="icon" aria-label="Toggle full screen" onClick={toggleFullscreen} className="hidden h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm sm:inline-flex"><Expand className="h-4 w-4"/></Button>
-          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="h-11 w-11 rounded-2xl border-white bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm"><UserRound className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-64"><DropdownMenuLabel><div>{profile?.full_name || profile?.email}</div><div className="mt-1 text-xs font-normal text-muted-foreground">{isSuperAdmin?'Super Admin':'Centre User'} · {centre.name}</div></DropdownMenuLabel></DropdownMenuContent></DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="hidden h-11 w-11 rounded-2xl border-white bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm lg:inline-flex"><UserRound className="h-4 w-4"/></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 rounded-xl p-2">
+              <DropdownMenuLabel><div className="truncate">{profile?.full_name || profile?.email}</div><div className="mt-1 truncate text-xs font-normal text-muted-foreground">{isSuperAdmin?'Super Admin':'Centre User'} · {centre.name}</div></DropdownMenuLabel>
+              <DropdownMenuSeparator/>
+              <DropdownMenuItem onClick={()=>onProfileAction?.('settings')}><Settings className="mr-2 h-4 w-4"/>Settings</DropdownMenuItem>
+              {isSuperAdmin && <DropdownMenuItem onClick={()=>onProfileAction?.('users')}><UsersRound className="mr-2 h-4 w-4"/>User Management</DropdownMenuItem>}
+              <DropdownMenuItem onClick={()=>onProfileAction?.('audit')}><ShieldCheck className="mr-2 h-4 w-4"/>Audit Log</DropdownMenuItem>
+              <DropdownMenuSeparator/>
+              <DropdownMenuItem onClick={()=>onProfileAction?.('logout')} className="text-rose-600 focus:bg-rose-50 focus:text-rose-700"><LogOut className="mr-2 h-4 w-4"/>Log Out</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
