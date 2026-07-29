@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -19,7 +20,7 @@ import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
   Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
-  Download, FileSpreadsheet, Menu
+  Download, FileSpreadsheet, Menu, Trash2
 } from 'lucide-react'
 
 // ---------- utils ----------
@@ -69,6 +70,11 @@ const apiPost = async (path, body) => {
 const apiPatch = async (path, body) => {
   const headers = { 'Content-Type':'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
   const r = await fetch('/api'+path, { method:'PATCH', headers, body: JSON.stringify(body) })
+  return r.json()
+}
+const apiDelete = async (path) => {
+  const headers = authToken ? { Authorization: `Bearer ${authToken}` } : {}
+  const r = await fetch('/api'+path, { method:'DELETE', headers })
   return r.json()
 }
 
@@ -523,7 +529,7 @@ function Stat({ label, value, hint, accent, onClick }) {
   }
   return (
     <Card role={clickable?'button':undefined} tabIndex={clickable?0:undefined} aria-label={clickable?`${label}: ${value}. Open details`:undefined} className={`border-border/50 bg-card/60 backdrop-blur ${clickable?'cursor-pointer hover:border-primary/50 transition-colors focus-visible:ring-2 focus-visible:ring-ring':''}`} onClick={onClick} onKeyDown={activate}>
-      <CardContent className="p-5">
+      <CardContent className="flex min-h-[116px] flex-col justify-center p-5 pt-5 sm:p-6 sm:pt-6">
         <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center justify-between">{label}{clickable && <Search className="h-3 w-3 opacity-40"/>}</div>
         <div className={`mt-1 text-2xl font-semibold ${accent||''}`}>{value}</div>
         {hint && <div className="mt-1 text-xs text-muted-foreground">{hint}</div>}
@@ -1728,10 +1734,12 @@ function LoginScreen({ onLogin }) {
   )
 }
 
-function UsersView({ centres, bump, refreshTick }) {
+function UsersView({ centres, currentUserId, bump, refreshTick }) {
   const [users, setUsers] = useState([])
   const [f, setF] = useState({ email: '', password: '', full_name: '', role: 'CENTRE_USER', centre_id: '' })
   const [open, setOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     apiGet('/users').then(data => { if (Array.isArray(data)) setUsers(data) })
@@ -1746,6 +1754,17 @@ function UsersView({ centres, bump, refreshTick }) {
     toast.success('User created successfully')
     setOpen(false)
     setF({ email: '', password: '', full_name: '', role: 'CENTRE_USER', centre_id: '' })
+    bump()
+  }
+
+  const remove = async () => {
+    if (!deleteTarget || deleteTarget.id === currentUserId) return
+    setDeleting(true)
+    const r = await apiDelete(`/users/${deleteTarget.id}`)
+    setDeleting(false)
+    if (r.error) return toast.error(r.error)
+    toast.success(`${deleteTarget.full_name || deleteTarget.email} removed completely`)
+    setDeleteTarget(null)
     bump()
   }
 
@@ -1793,7 +1812,7 @@ function UsersView({ centres, bump, refreshTick }) {
         <CardContent>
           <Table>
             <TableHeader>
-              <TableRow><TableHead>User / Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead>Assigned Scope</TableHead><TableHead>Status</TableHead><TableHead>Created</TableHead></TableRow>
+              <TableRow><TableHead>User / Name</TableHead><TableHead>Email</TableHead><TableHead>Role</TableHead><TableHead>Assigned Scope</TableHead><TableHead>Status</TableHead><TableHead>Created</TableHead><TableHead className="text-right">Action</TableHead></TableRow>
             </TableHeader>
             <TableBody>
               {users.map(u => {
@@ -1806,6 +1825,11 @@ function UsersView({ centres, bump, refreshTick }) {
                     <TableCell className="text-sm">{cName}</TableCell>
                     <TableCell><Badge className="bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20">Active</Badge></TableCell>
                     <TableCell className="text-xs text-muted-foreground">{new Date(u.created_at || Date.now()).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-right">
+                      <Button size="sm" variant="ghost" disabled={u.id === currentUserId} aria-label={`Delete ${u.full_name || u.email}`} title={u.id === currentUserId ? 'You cannot delete your own account' : 'Delete user'} onClick={()=>setDeleteTarget(u)} className="text-rose-600 hover:bg-rose-500/10 hover:text-rose-700 disabled:text-muted-foreground">
+                        <Trash2 className="h-4 w-4 sm:mr-2"/><span className="hidden sm:inline">Delete</span>
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 )
               })}
@@ -1813,6 +1837,19 @@ function UsersView({ centres, bump, refreshTick }) {
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open=>{ if (!open && !deleting) setDeleteTarget(null) }}>
+        <AlertDialogContent className="max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this user completely?</AlertDialogTitle>
+            <AlertDialogDescription>This permanently removes {deleteTarget?.full_name || deleteTarget?.email} from login access and User Management. This action cannot be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep User</AlertDialogCancel>
+            <AlertDialogAction disabled={deleting} onClick={remove} className="bg-rose-600 text-white hover:bg-rose-700">{deleting?'Deleting...':'Delete User'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -1822,6 +1859,8 @@ function TherapistsView({ centre, centres, bump, refreshTick }) {
   const [name, setName] = useState('')
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     const data = await apiGet(`/therapists?centre_id=${centre.id}`)
@@ -1848,6 +1887,16 @@ function TherapistsView({ centre, centres, bump, refreshTick }) {
     if (result.error) return toast.error(result.error)
     toast.success(`${therapist.name} is now ${therapist.active ? 'inactive' : 'active'}`)
     bump(); await load()
+  }
+
+  const remove = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const result = await apiDelete(`/therapists/${deleteTarget.id}`)
+    setDeleting(false)
+    if (result.error) return toast.error(result.error)
+    toast.success(`${deleteTarget.name} removed`)
+    setDeleteTarget(null); bump(); await load()
   }
 
   return (
@@ -1881,13 +1930,31 @@ function TherapistsView({ centre, centres, bump, refreshTick }) {
                   {centre.id === 'ALL' && <TableCell>{centres.find(c=>c.id===therapist.centre_id)?.name || 'Unknown centre'}</TableCell>}
                   <TableCell><Badge className={therapist.active?'bg-emerald-500/20 text-emerald-400':'bg-muted text-muted-foreground'}>{therapist.active?'Active':'Inactive'}</Badge></TableCell>
                   <TableCell className="text-xs text-muted-foreground">{new Date(therapist.created_at).toLocaleDateString('en-IN')}</TableCell>
-                  <TableCell className="text-right"><Button size="sm" variant="outline" onClick={()=>toggle(therapist)}>{therapist.active?'Deactivate':'Activate'}</Button></TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="outline" onClick={()=>toggle(therapist)}>{therapist.active?'Deactivate':'Activate'}</Button>
+                      <Button size="sm" variant="ghost" aria-label={`Remove ${therapist.name}`} title="Remove therapist" onClick={()=>setDeleteTarget(therapist)} className="text-rose-600 hover:bg-rose-500/10 hover:text-rose-700"><Trash2 className="h-4 w-4"/></Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open=>{ if (!open && !deleting) setDeleteTarget(null) }}>
+        <AlertDialogContent className="max-w-md rounded-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this therapist?</AlertDialogTitle>
+            <AlertDialogDescription>{deleteTarget?.name} will be permanently removed if they have no booking history. Therapists linked to historical bookings must be deactivated instead.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={deleting} onClick={remove} className="bg-rose-600 text-white hover:bg-rose-700">{deleting?'Removing...':'Remove Therapist'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -2059,7 +2126,19 @@ function App() {
                 <div className="truncate text-sm font-semibold">{navItems.find(n=>n.id===view)?.label}</div>
                 <div className="flex items-center gap-1 truncate text-xs text-muted-foreground"><Building2 className="h-3 w-3 shrink-0"/><span className="truncate">{centre.name}</span></div>
               </div>
-              <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg"><img src="/logo.png" alt="" className="h-full w-full object-cover"/></div>
+              {profile.role === 'SUPER_ADMIN' ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="icon" aria-label={`Change centre. Current centre: ${centre.name}`} title="Change centre" className="shrink-0 border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"><Building2 className="h-4 w-4"/></Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuItem onClick={()=>setCentre(ALL_CENTRES)} className={centre.id === 'ALL' ? 'bg-muted font-semibold' : ''}><Building2 className="mr-2 h-4 w-4 text-amber-500"/>All Centres (Collective)</DropdownMenuItem>
+                    {centres.map(c=><DropdownMenuItem key={c.id} onClick={()=>setCentre(c)} className={centre.id === c.id ? 'bg-muted font-semibold' : ''}><MapPin className="mr-2 h-4 w-4 text-amber-500"/>{c.name}</DropdownMenuItem>)}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg"><img src="/logo.png" alt="" className="h-full w-full object-cover"/></div>
+              )}
             </div>
           </header>
 
@@ -2088,7 +2167,7 @@ function App() {
                 {view==='reports'    && <ReportsView {...props} />}
                 {view==='therapists' && <TherapistsView {...props} />}
                 {view==='audit'      && <AuditView {...props} />}
-                {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
+                {view==='users'      && profile.role === 'SUPER_ADMIN' && <UsersView centres={centres} currentUserId={user.id} bump={() => setBump(b=>b+1)} refreshTick={bump} />}
               </div>
             </div>
           </main>
