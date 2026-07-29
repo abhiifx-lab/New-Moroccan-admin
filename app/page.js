@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,11 @@ import {
   Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
   Download, FileSpreadsheet, Menu, Trash2
 } from 'lucide-react'
+
+const DashboardMissionControl = dynamic(
+  () => import('@/components/dashboard/mission-control').then(module => module.DashboardMissionControl),
+  { ssr:false, loading:() => <div className="space-y-4" aria-label="Loading dashboard"><Skeleton className="h-20 rounded-2xl"/><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"><Skeleton className="h-32 rounded-2xl"/><Skeleton className="h-32 rounded-2xl"/><Skeleton className="h-32 rounded-2xl"/></div><Skeleton className="h-80 rounded-2xl"/></div> }
+)
 
 // ---------- utils ----------
 const toPaise = (r) => Math.round((Number(r) || 0) * 100)
@@ -564,7 +570,7 @@ function CollectiveScopeNotice({ feature }) {
 // ============================================================================
 // DASHBOARD
 // ============================================================================
-function DashboardView({ centre, refreshTick, onDrill }) {
+function LegacyDashboardView({ centre, refreshTick, onDrill }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [date, setDate] = useState(todayStr())
@@ -667,10 +673,17 @@ function DashboardView({ centre, refreshTick, onDrill }) {
   )
 }
 
+function DashboardView({ centre, profile, refreshTick, onDrill, onNavigateAction }) {
+  if (process.env.NEXT_PUBLIC_LEGACY_DASHBOARD === '1') {
+    return <LegacyDashboardView centre={centre} refreshTick={refreshTick} onDrill={onDrill}/>
+  }
+  return <DashboardMissionControl {...{ centre, profile, refreshTick, onDrill, onNavigateAction, apiGet, formatMoney:formatINR }} today={todayStr()}/>
+}
+
 // ============================================================================
 // BOOKING
 // ============================================================================
-function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
+function BookingView({ centre, centres, role, bump, onDrill, refreshTick, pendingAction, onActionConsumed }) {
   const blankForm = () => ({
     customer_phone:'', customer_name:'', customer_email:'', treatment_name:'', service_id:'', therapist_id:'',
     appointment_date:todayStr(), appointment_time:nearestAppointmentTime(), offer_code:'', payment_method:'CASH',
@@ -703,6 +716,12 @@ function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
     setEvents(Array.isArray(e) ? e : [])
   }
   useEffect(() => { if (centre?.id) load() }, [centre?.id, refreshTick])
+  useEffect(() => {
+    if (!isAllCentres && ['new-booking','walk-in'].includes(pendingAction)) {
+      setOpen(true)
+      onActionConsumed?.()
+    }
+  }, [pendingAction, isAllCentres, onActionConsumed])
   useEffect(() => {
     const phone = f.customer_phone.replace(/\D/g, '')
     if (phone.length < 10) { setCustomerData(null); return }
@@ -858,7 +877,7 @@ function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
 // ============================================================================
 // MEMBERSHIP / GIFT CARD / EXPENSE / CASH MOVEMENT (same as before, with drill)
 // ============================================================================
-function MembershipView({ centre, centres, role, bump, refreshTick }) {
+function MembershipView({ centre, centres, role, bump, refreshTick, pendingAction, onActionConsumed }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
   const isAllCentres = centre?.id === 'ALL'
@@ -870,6 +889,7 @@ function MembershipView({ centre, centres, role, bump, refreshTick }) {
     if (!Array.isArray(data)) toast.error(data?.error || 'Unable to load memberships')
   }
   useEffect(()=>{load()},[centre?.id, refreshTick])
+  useEffect(()=>{ if (!isAllCentres && pendingAction === 'membership') { setOpen(true); onActionConsumed?.() } },[pendingAction,isAllCentres,onActionConsumed])
   const submit = async () => {
     const value = toPaise(f.amount)
     const r = await apiPost('/events/membership', {
@@ -925,7 +945,7 @@ function MembershipView({ centre, centres, role, bump, refreshTick }) {
   )
 }
 
-function GiftCardView({ centre, centres, role, bump, refreshTick }) {
+function GiftCardView({ centre, centres, role, bump, refreshTick, pendingAction, onActionConsumed }) {
   const [list, setList] = useState([])
   const [open, setOpen] = useState(false)
   const isAllCentres = centre?.id === 'ALL'
@@ -937,6 +957,7 @@ function GiftCardView({ centre, centres, role, bump, refreshTick }) {
     if (!Array.isArray(data)) toast.error(data?.error || 'Unable to load gift cards')
   }
   useEffect(()=>{load()},[centre?.id, refreshTick])
+  useEffect(()=>{ if (!isAllCentres && pendingAction === 'gift-card') { setOpen(true); onActionConsumed?.() } },[pendingAction,isAllCentres,onActionConsumed])
   const submit = async () => {
     const value = toPaise(f.amount)
     const r = await apiPost('/events/gift-card', {
@@ -988,7 +1009,7 @@ function GiftCardView({ centre, centres, role, bump, refreshTick }) {
   )
 }
 
-function ExpenseView({ centre, centres, role, bump, onDrill, refreshTick }) {
+function ExpenseView({ centre, centres, role, bump, onDrill, refreshTick, pendingAction, onActionConsumed }) {
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
   const isAllCentres = centre?.id === 'ALL'
@@ -996,6 +1017,7 @@ function ExpenseView({ centre, centres, role, bump, onDrill, refreshTick }) {
   const [f, setF] = useState({ amount:'', payment_method:'CASH', category:'Utilities', vendor:'', notes:'' })
   const load = async () => setEvents(await apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=EXPENSE`))
   useEffect(()=>{ if(centre?.id) load()},[centre?.id, refreshTick])
+  useEffect(()=>{ if (!isAllCentres && pendingAction === 'expense') { setOpen(true); onActionConsumed?.() } },[pendingAction,isAllCentres,onActionConsumed])
   const reversedIds = useMemo(() => new Set(events.filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
   const submit = async () => {
     const r = await apiPost('/events/expense', { ...f, centre_id: centre.id, created_by: role, role, amount: toPaise(f.amount) })
@@ -2035,6 +2057,7 @@ function App() {
   const [centre, setCentre] = useState(null)
   const [view, setView] = useState('dashboard')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [pendingAction, setPendingAction] = useState(null)
   const [bump, setBump] = useState(0)
   const [drillCtx, setDrillCtx] = useState(null)
 
@@ -2068,6 +2091,7 @@ function App() {
   DrillContext.open = (ctx) => setDrillCtx(ctx)
   DrillContext.close = () => setDrillCtx(null)
   const onDrill = (ctx) => setDrillCtx(ctx)
+  const consumeDashboardAction = useCallback(() => setPendingAction(null), [])
 
   if (authLoading) {
     return (
@@ -2093,7 +2117,20 @@ function App() {
   ]
 
   const Icon = navItems.find(n=>n.id===view)?.icon || LayoutDashboard
-  const props = { centre, centres, role, bump: () => setBump(b=>b+1), refreshTick: bump, onDrill }
+  const handleDashboardAction = (action) => {
+    const target = {
+      'view-bookings':'booking', 'new-booking':'booking', 'walk-in':'booking', expense:'expense',
+      membership:'membership', 'gift-card':'giftcard', close:'close', register:'register', cashbook:'cashbook', reports:'reports'
+    }[action]
+    if (!target) return
+    if (['new-booking','walk-in','expense','membership','gift-card'].includes(action)) setPendingAction(action)
+    else setPendingAction(null)
+    setView(target)
+  }
+  const props = {
+    centre, centres, role, profile, bump: () => setBump(b=>b+1), refreshTick:bump, onDrill,
+    onNavigateAction:handleDashboardAction, pendingAction, onActionConsumed:consumeDashboardAction
+  }
 
   const handleLogout = async () => {
     await apiPost('/auth/logout', {})
