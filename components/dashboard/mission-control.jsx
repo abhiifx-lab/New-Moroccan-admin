@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Area, AreaChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart,
+  Area, AreaChart, CartesianGrid, Cell, Line, Pie, PieChart,
   ResponsiveContainer, Tooltip as ChartTooltip, XAxis, YAxis,
 } from 'recharts'
 import {
   ArrowRight, Bell, BookOpen, CalendarDays, CalendarPlus, CreditCard, Expand,
-  Gift, IndianRupee, LockKeyhole, LogOut, Receipt, Settings, ShieldCheck, Sparkles,
+  Gift, LockKeyhole, LogOut, Receipt, Settings, ShieldCheck, Sparkles,
   TrendingDown, TrendingUp, UserRound, UsersRound, WalletCards,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -19,7 +19,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { collectionPresentation } from '@/lib/dashboard-presenters'
 
-const PAYMENT_COLOURS = ['#7c3aed', '#2563eb', '#10b981', '#f59e0b']
+const PAYMENT_COLOURS = ['#9182ec', '#79a8ee', '#7fc6a4', '#f0ac7d']
+const SURFACE = 'min-w-0 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.02),0_10px_30px_rgba(51,65,85,0.045)]'
 
 const isoShift = (date, days) => {
   const value = new Date(`${date}T00:00:00Z`)
@@ -87,7 +88,7 @@ const bookingStatus = event => {
   return raw.charAt(0).toUpperCase() + raw.slice(1)
 }
 
-function Delta({ current, previous, suffix='vs previous day', compact=false }) {
+function Delta({ current, previous, suffix='vs yesterday', compact=false }) {
   const percent = safePercent(current, previous)
   const suffixNode = <span className={`${compact?'hidden sm:inline ':''}text-muted-foreground`}>{suffix}</span>
   if (percent == null) return <span className="text-emerald-600">New {suffixNode}</span>
@@ -96,28 +97,22 @@ function Delta({ current, previous, suffix='vs previous day', compact=false }) {
   return <span className={positive?'text-emerald-600':'text-rose-500'}><Icon className="mr-1 inline h-3.5 w-3.5"/>{Math.abs(percent)}% <span className="font-normal">{suffixNode}</span></span>
 }
 
-function MissionKpi({ label, value, icon:Icon, tone, current, previous, onClick }) {
-  const tones = {
-    violet:'bg-violet-100 text-violet-700', emerald:'bg-emerald-100 text-emerald-700',
-    amber:'bg-amber-100 text-amber-700', blue:'bg-blue-100 text-blue-700',
-    rose:'bg-rose-100 text-rose-700', indigo:'bg-indigo-100 text-indigo-700',
-  }
+function MissionKpi({ label, value, tone, current, previous, onClick }) {
+  const tones = { violet:'#9182ec', emerald:'#64be93', amber:'#eda56c', blue:'#6da4ee', rose:'#e9879a', indigo:'#7b8ee8' }
   return (
-    <Card role={onClick?'button':undefined} tabIndex={onClick?0:undefined} onClick={onClick} onKeyDown={event=>{ if (onClick && ['Enter',' '].includes(event.key)) { event.preventDefault(); onClick() } }} className={`mission-kpi min-w-0 overflow-hidden border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.07)] transition duration-200 ${onClick?'cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(76,29,149,0.12)] focus-visible:ring-2 focus-visible:ring-violet-500':''}`}>
-      <CardContent className="flex min-h-[132px] flex-col items-start justify-center gap-2 p-3 pt-3 sm:flex-row sm:items-center sm:gap-4 sm:p-5 sm:pt-5">
-        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${tones[tone] || tones.violet}`}><Icon className="h-5 w-5 sm:h-6 sm:w-6"/></div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[9px] font-semibold uppercase leading-tight tracking-[0.1em] text-slate-500 sm:text-[11px] sm:tracking-[0.12em]">{label}</div>
-          <div className="mt-1 whitespace-nowrap text-lg font-bold leading-tight tracking-tight text-slate-950 sm:text-2xl">{value}</div>
-          <div className="mt-2 truncate text-[10px] font-medium sm:text-[11px]"><Delta current={current} previous={previous} compact/></div>
-        </div>
+    <Card role={onClick?'button':undefined} tabIndex={onClick?0:undefined} onClick={onClick} onKeyDown={event=>{ if (onClick && ['Enter',' '].includes(event.key)) { event.preventDefault(); onClick() } }} className={`mission-kpi ${SURFACE} transition duration-200 ease-out ${onClick?'cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/70 hover:shadow-[0_12px_32px_rgba(51,65,85,0.08)] focus-visible:ring-2 focus-visible:ring-violet-500':''}`}>
+      <CardContent className="relative flex min-h-[112px] flex-col justify-center p-4 sm:min-h-[116px] sm:p-5">
+        <span className="absolute right-4 top-4 h-1.5 w-1.5 rounded-full" style={{backgroundColor:tones[tone] || tones.violet}} aria-hidden="true"/>
+        <div className="pr-5 text-[9px] font-semibold uppercase leading-tight tracking-[0.1em] text-slate-500 sm:text-[10px] sm:tracking-[0.11em]">{label}</div>
+        <div className="mt-2 whitespace-nowrap text-[19px] font-bold leading-none tracking-[-0.025em] text-slate-950 2xl:text-[22px]">{value}</div>
+        <div className="mt-3 truncate text-[9px] font-medium 2xl:text-[11px]"><Delta current={current} previous={previous} compact/></div>
       </CardContent>
     </Card>
   )
 }
 
 function SectionHeading({ title, subtitle, control }) {
-  return <CardHeader className="min-w-0 flex-row items-start justify-between gap-4 p-5 pb-2"><div className="min-w-0"><CardTitle className="text-base font-bold text-slate-950">{title}</CardTitle>{subtitle && <p className="mt-1 text-xs text-slate-500">{subtitle}</p>}</div>{control && <div className="shrink-0">{control}</div>}</CardHeader>
+  return <CardHeader className="min-w-0 flex-col items-stretch justify-between gap-3 p-4 pb-2 sm:flex-row sm:items-start"><div className="min-w-0"><CardTitle className="text-sm font-bold tracking-[-0.01em] text-slate-950 sm:text-[15px]">{title}</CardTitle>{subtitle && <p className="mt-1 text-[11px] text-slate-500 sm:text-xs">{subtitle}</p>}</div>{control && <div className="shrink-0">{control}</div>}</CardHeader>
 }
 
 function RevenueTooltip({ active, payload, label, formatMoney }) {
@@ -126,7 +121,7 @@ function RevenueTooltip({ active, payload, label, formatMoney }) {
 }
 
 function EmptyCard({ icon:Icon=Sparkles, title, text }) {
-  return <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-50 text-violet-500"><Icon className="h-5 w-5"/></div><div className="font-semibold text-slate-800">{title}</div><p className="mt-1 max-w-xs text-sm text-slate-500">{text}</p></div>
+  return <div className="flex min-h-40 flex-col items-center justify-center px-6 text-center"><div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-violet-50 text-violet-500"><Icon className="h-4 w-4"/></div><div className="text-sm font-semibold text-slate-800">{title}</div><p className="mt-1 max-w-xs text-xs leading-5 text-slate-500">{text}</p></div>
 }
 
 function StatusBadge({ status }) {
@@ -137,7 +132,7 @@ function StatusBadge({ status }) {
 
 function QuickAction({ icon:Icon, label, tone, onClick }) {
   const tones = { violet:'bg-violet-100 text-violet-700', emerald:'bg-emerald-100 text-emerald-700', amber:'bg-amber-100 text-amber-700', rose:'bg-rose-100 text-rose-700', blue:'bg-blue-100 text-blue-700', indigo:'bg-indigo-100 text-indigo-700' }
-  return <button type="button" onClick={onClick} className="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-gradient-to-br from-white to-slate-50/70 p-3 text-center text-xs font-semibold text-slate-700 transition hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className={`flex h-10 w-10 items-center justify-center rounded-2xl transition group-hover:scale-105 ${tones[tone]}`}><Icon className="h-5 w-5"/></span>{label}</button>
+  return <button type="button" onClick={onClick} className="group flex min-h-[78px] items-center justify-center gap-2.5 rounded-xl border border-slate-200/70 bg-white p-3 text-center text-[11px] font-semibold text-slate-700 transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:bg-violet-50/30 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition group-hover:scale-105 ${tones[tone]}`}><Icon className="h-4 w-4"/></span>{label}</button>
 }
 
 export function DashboardMissionControl({ centre, profile, refreshTick, onDrill, onNavigateAction, onProfileAction, apiGet, formatMoney, today }) {
@@ -210,7 +205,8 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
   const paymentTotal = collections.total
   const paymentData = collections.methods
   const reversedEventIds = useMemo(()=>new Set([...bookings,...serviceEvents].filter(event=>event.is_reversal&&event.reverses).map(event=>event.reverses)),[bookings,serviceEvents])
-  const timeline = useMemo(()=>bookings.filter(event=>!event.is_reversal&&!reversedEventIds.has(event.id)).sort((a,b)=>String(a.booking?.appointment_time||a.created_at).localeCompare(String(b.booking?.appointment_time||b.created_at))).slice(0,5),[bookings,reversedEventIds])
+  const appointmentTimeline = useMemo(()=>bookings.filter(event=>!event.is_reversal&&!reversedEventIds.has(event.id)).sort((a,b)=>String(a.booking?.appointment_time||a.created_at).localeCompare(String(b.booking?.appointment_time||b.created_at))),[bookings,reversedEventIds])
+  const timeline = appointmentTimeline.slice(0,3)
   const topServices = useMemo(()=>{
     const totals = new Map()
     for (const event of serviceEvents) {
@@ -259,18 +255,18 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
   }
 
   return (
-    <div className="mission-dashboard space-y-5 text-slate-800">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <div className="mission-dashboard space-y-4 text-slate-800">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="flex items-center gap-2"><h1 className="text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'}!</h1><span className="text-2xl" aria-hidden="true">👋</span></div>
-          <p className="mt-1 text-sm text-slate-500">Here’s what’s happening at <span className="font-semibold text-slate-700">{centre.name}</span> today.</p>
+          <div className="flex items-center gap-2"><h1 className="text-2xl font-bold tracking-[-0.035em] text-slate-950 sm:text-[28px]">{greeting()}, {profile?.full_name?.split(' ')[0] || 'there'}!</h1><span className="text-xl" aria-hidden="true">👋</span></div>
+          <p className="mt-1 text-xs text-slate-500 sm:text-sm">Here’s what’s happening at <span className="font-semibold text-violet-700">{centre.name}</span> today.</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="relative min-w-0 flex-1 sm:flex-none"><CalendarDays className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-violet-500"/><Input aria-label="Dashboard business date" type="date" value={date} onChange={event=>setDate(event.target.value)} className="h-11 w-full rounded-2xl border-white bg-white/90 pl-10 pr-3 shadow-sm sm:w-[170px]"/></div>
-          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Notifications" className="h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm"><Bell className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-72"><DropdownMenuLabel>Notifications</DropdownMenuLabel><DropdownMenuSeparator/><div className="px-3 py-5 text-center text-sm text-muted-foreground">No new notifications</div></DropdownMenuContent></DropdownMenu>
-          <Button variant="outline" size="icon" aria-label="Toggle full screen" onClick={toggleFullscreen} className="hidden h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm sm:inline-flex"><Expand className="h-4 w-4"/></Button>
+          <div className="relative min-w-0 flex-1 sm:flex-none"><CalendarDays className="pointer-events-none absolute left-3 top-1/2 z-10 h-3.5 w-3.5 -translate-y-1/2 text-violet-500"/><Input aria-label="Dashboard business date" type="date" value={date} onChange={event=>setDate(event.target.value)} className="h-10 w-full rounded-xl border-slate-200/70 bg-white pl-9 pr-2 text-xs shadow-sm sm:w-[164px]"/></div>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Notifications" className="h-10 w-10 rounded-xl border-slate-200/70 bg-white shadow-sm"><Bell className="h-3.5 w-3.5"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-72"><DropdownMenuLabel>Notifications</DropdownMenuLabel><DropdownMenuSeparator/><div className="px-3 py-5 text-center text-sm text-muted-foreground">No new notifications</div></DropdownMenuContent></DropdownMenu>
+          <Button variant="outline" size="icon" aria-label="Toggle full screen" onClick={toggleFullscreen} className="hidden h-10 w-10 rounded-xl border-slate-200/70 bg-white shadow-sm sm:inline-flex"><Expand className="h-3.5 w-3.5"/></Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="hidden h-11 w-11 rounded-2xl border-white bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm md:inline-flex"><UserRound className="h-4 w-4"/></Button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="hidden h-10 w-10 rounded-full border-violet-100 bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm md:inline-flex"><UserRound className="h-3.5 w-3.5"/></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64 rounded-xl p-2">
               <DropdownMenuLabel><div className="truncate">{profile?.full_name || profile?.email}</div><div className="mt-1 truncate text-xs font-normal text-muted-foreground">{isSuperAdmin?'Super Admin':'Centre User'} · {centre.name}</div></DropdownMenuLabel>
               <DropdownMenuSeparator/>
@@ -284,58 +280,58 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
         </div>
       </div>
 
-      {loading ? <div data-mobile-columns="2" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">{Array.from({length:6},(_,index)=><Skeleton key={index} className="h-[132px] rounded-2xl"/>)}</div> : errors.daily ? <Card className="border-rose-100 bg-rose-50/60"><CardContent className="p-5 pt-5 text-sm text-rose-700">{errors.daily} Choose another date or refresh the page.</CardContent></Card> : <div data-mobile-columns="2" className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
-        <MissionKpi label="Today's Bookings" value={agg.bookings||0} icon={CalendarDays} tone="violet" current={agg.bookings} previous={previousAgg.bookings} onClick={()=>drill('bookings')}/>
-        <MissionKpi label="Today's Revenue" value={formatMoney(agg.total_revenue)} icon={IndianRupee} tone="emerald" current={agg.total_revenue} previous={previousAgg.total_revenue} onClick={()=>drill('total_revenue')}/>
-        <MissionKpi label="Cash in Hand" value={formatMoney(agg.closing_cash_expected)} icon={WalletCards} tone="amber" current={agg.closing_cash_expected} previous={previousAgg.closing_cash_expected} onClick={()=>drill('closing_cash_expected')}/>
-        <MissionKpi label="Online Payments" value={formatMoney(online)} icon={CreditCard} tone="blue" current={online} previous={previousOnline} onClick={()=>drill('online_sales')}/>
-        <MissionKpi label="Guests Today" value={agg.guests||0} icon={UsersRound} tone="indigo" current={agg.guests} previous={previousAgg.guests} onClick={()=>drill('guests')}/>
-        <MissionKpi label="Membership Sales" value={formatMoney(agg.membership_sales)} icon={Sparkles} tone="rose" current={agg.membership_sales} previous={previousAgg.membership_sales} onClick={()=>drill('membership_sales')}/>
+      {loading ? <div data-mobile-columns="2" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">{Array.from({length:6},(_,index)=><Skeleton key={index} className="h-[116px] rounded-2xl"/>)}</div> : errors.daily ? <Card className="border-rose-100 bg-rose-50/60"><CardContent className="p-5 pt-5 text-sm text-rose-700">{errors.daily} Choose another date or refresh the page.</CardContent></Card> : <div data-mobile-columns="2" className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <MissionKpi label="Today's Bookings" value={agg.bookings||0} tone="violet" current={agg.bookings} previous={previousAgg.bookings} onClick={()=>drill('bookings')}/>
+        <MissionKpi label="Today's Revenue" value={formatMoney(agg.total_revenue)} tone="emerald" current={agg.total_revenue} previous={previousAgg.total_revenue} onClick={()=>drill('total_revenue')}/>
+        <MissionKpi label="Cash in Hand" value={formatMoney(agg.closing_cash_expected)} tone="amber" current={agg.closing_cash_expected} previous={previousAgg.closing_cash_expected} onClick={()=>drill('closing_cash_expected')}/>
+        <MissionKpi label="Online Payments" value={formatMoney(online)} tone="blue" current={online} previous={previousOnline} onClick={()=>drill('online_sales')}/>
+        <MissionKpi label="Guests Today" value={agg.guests||0} tone="indigo" current={agg.guests} previous={previousAgg.guests} onClick={()=>drill('guests')}/>
+        <MissionKpi label="Membership Sales" value={formatMoney(agg.membership_sales)} tone="rose" current={agg.membership_sales} previous={previousAgg.membership_sales} onClick={()=>drill('membership_sales')}/>
       </div>}
 
-      <div className="grid gap-5 xl:grid-cols-[1.45fr_1fr]">
-        <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
-          <SectionHeading title="Revenue Overview" subtitle={`${formatLongDate(periodBounds(date,chartPeriod).currentStart)} – ${formatLongDate(periodBounds(date,chartPeriod).currentEnd)}`} control={<Select value={chartPeriod} onValueChange={setChartPeriod}><SelectTrigger className="h-9 w-[125px] rounded-xl"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="today">Today</SelectItem><SelectItem value="week">This Week</SelectItem><SelectItem value="month">This Month</SelectItem><SelectItem value="year">This Year</SelectItem></SelectContent></Select>}/>
-          <CardContent className="p-3 pt-2 sm:p-5 sm:pt-2">
-            {chartLoading ? <Skeleton className="h-[290px] rounded-xl"/> : errors.chart ? <EmptyCard title="Revenue chart unavailable" text={errors.chart}/> : chartData.every(row=>row.current===0&&row.previous===0) ? <EmptyCard title="No revenue in this period" text="Revenue will appear here as financial events are recorded."/> : <div className="h-[290px] w-full"><ResponsiveContainer width="100%" height="100%"><LineChart data={chartData} margin={{top:12,right:10,left:-15,bottom:4}}><CartesianGrid stroke="#ede9fe" strokeDasharray="3 3" vertical={false}/><XAxis dataKey="label" tick={{fontSize:11,fill:'#64748b'}} axisLine={false} tickLine={false} minTickGap={24}/><YAxis tickFormatter={compactMoney} tick={{fontSize:10,fill:'#94a3b8'}} axisLine={false} tickLine={false}/><ChartTooltip content={<RevenueTooltip formatMoney={formatMoney}/>}/><Line name="Current period" type="monotone" dataKey="current" stroke="#7c3aed" strokeWidth={3} dot={{r:3,fill:'#7c3aed',strokeWidth:0}} activeDot={{r:6,fill:'#fff',stroke:'#7c3aed',strokeWidth:3}}/><Line name="Previous period" type="monotone" dataKey="previous" stroke="#cbd5e1" strokeWidth={2} strokeDasharray="6 6" dot={false}/></LineChart></ResponsiveContainer></div>}
+      <div className="grid gap-4 xl:grid-cols-[1.45fr_1fr]">
+        <Card className={SURFACE}>
+          <SectionHeading title="Revenue Overview" subtitle={`${formatLongDate(periodBounds(date,chartPeriod).currentStart)} – ${formatLongDate(periodBounds(date,chartPeriod).currentEnd)}`} control={<div className="grid grid-cols-4 rounded-xl border border-slate-200/70 bg-slate-50/80 p-1 text-[10px] font-medium text-slate-500">{[['today','Today'],['week','This Week'],['month','This Month'],['year','This Year']].map(([value,label])=><button key={value} type="button" onClick={()=>setChartPeriod(value)} className={`rounded-lg px-2 py-1.5 transition ${chartPeriod===value?'bg-white text-violet-700 shadow-sm':'hover:text-slate-800'}`}>{label}</button>)}</div>}/>
+          <CardContent className="p-3 pt-2 sm:p-4 sm:pt-2">
+            {chartLoading ? <Skeleton className="h-[250px] rounded-xl"/> : errors.chart ? <EmptyCard title="Revenue chart unavailable" text={errors.chart}/> : chartData.every(row=>row.current===0&&row.previous===0) ? <EmptyCard title="No revenue in this period" text="Revenue will appear here as financial events are recorded."/> : <div className="h-[250px] w-full"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{top:12,right:8,left:-17,bottom:0}}><defs><linearGradient id="revenue-area" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#9182ec" stopOpacity={0.24}/><stop offset="72%" stopColor="#b8d7f4" stopOpacity={0.07}/><stop offset="100%" stopColor="#ffffff" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#edf0f5" strokeDasharray="2 4" vertical={false}/><XAxis dataKey="label" tick={{fontSize:10,fill:'#718096'}} axisLine={false} tickLine={false} minTickGap={22}/><YAxis tickFormatter={compactMoney} tick={{fontSize:10,fill:'#94a3b8'}} axisLine={false} tickLine={false}/><ChartTooltip content={<RevenueTooltip formatMoney={formatMoney}/>}/><Area name="Current period" type="monotone" dataKey="current" stroke="#8070e8" fill="url(#revenue-area)" strokeWidth={2.5} dot={{r:2.5,fill:'#8070e8',strokeWidth:0}} activeDot={{r:5,fill:'#fff',stroke:'#8070e8',strokeWidth:2.5}}/><Line name="Previous period" type="monotone" dataKey="previous" stroke="#c7cfdb" strokeWidth={1.5} strokeDasharray="5 5" dot={false}/></AreaChart></ResponsiveContainer></div>}
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
+        <Card className={SURFACE}>
           <SectionHeading title="Payment Breakdown" subtitle="Fresh collections for the selected business date" control={<Badge variant="secondary" className="rounded-lg bg-violet-50 text-violet-700">Today</Badge>}/>
-          <CardContent className="grid min-h-[310px] items-center gap-3 p-4 pt-1 sm:grid-cols-[1fr_1.05fr] sm:p-5 sm:pt-1">
-            {paymentTotal===0 ? <div className="sm:col-span-2"><EmptyCard icon={CreditCard} title="No payment collections" text="Cash, card and UPI collections will appear here."/></div> : <><div className="relative h-[190px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={paymentData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={1.5} stroke="none">{paymentData.map((item,index)=><Cell key={item.name} fill={PAYMENT_COLOURS[index]}/>)}</Pie><ChartTooltip formatter={value=>formatMoney(value)}/></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><strong className="text-lg text-slate-950">{formatMoney(paymentTotal)}</strong><span className="text-[10px] uppercase tracking-wider text-slate-500">Collected</span></div></div><div className="space-y-2">{paymentData.map((item,index)=>{const percent=paymentTotal?Math.round(item.value/paymentTotal*100):0;return <button type="button" key={item.name} onClick={()=>drill(item.metric)} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg p-1.5 text-left text-xs transition hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className="h-2.5 w-2.5 rounded-full" style={{backgroundColor:PAYMENT_COLOURS[index]}}/><span className="text-slate-600">{item.name}</span><span className="text-right"><strong className="text-slate-900">{formatMoney(item.value)}</strong><span className="ml-2 text-slate-400">{percent}%</span></span></button>})}</div></>}
+          <CardContent className="grid min-h-[272px] items-center gap-3 p-4 pt-0 sm:grid-cols-[0.9fr_1.1fr]">
+            {paymentTotal===0 ? <div className="sm:col-span-2"><EmptyCard icon={CreditCard} title="No payment collections" text="Cash, card and UPI collections will appear here."/></div> : <><div className="relative h-[174px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={paymentData} dataKey="value" nameKey="name" innerRadius={52} outerRadius={76} paddingAngle={1} stroke="#ffffff" strokeWidth={2}>{paymentData.map((item,index)=><Cell key={item.name} fill={PAYMENT_COLOURS[index]}/>)}</Pie><ChartTooltip formatter={value=>formatMoney(value)}/></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><strong className="text-base font-bold text-slate-950">{formatMoney(paymentTotal)}</strong><span className="text-[9px] uppercase tracking-wider text-slate-500">Collected</span></div></div><div className="space-y-1.5">{paymentData.map((item,index)=>{const percent=paymentTotal?Math.round(item.value/paymentTotal*100):0;return <button type="button" key={item.name} onClick={()=>drill(item.metric)} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg px-1.5 py-2 text-left text-[11px] transition hover:bg-violet-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className="h-2 w-2 rounded-full" style={{backgroundColor:PAYMENT_COLOURS[index]}}/><span className="text-slate-600">{item.name}</span><span className="text-right"><strong className="text-slate-900">{formatMoney(item.value)}</strong><span className="ml-2 text-slate-400">{percent}%</span></span></button>})}</div></>}
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.9fr_0.9fr]">
-        <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
+      <div className="grid gap-4 xl:grid-cols-[1.15fr_1fr_0.95fr]">
+        <Card className={SURFACE}>
           <SectionHeading title="Today's Appointments" subtitle={`${bookings.length} scheduled for ${formatShortDate(date)}`} control={<Button variant="ghost" size="sm" onClick={()=>onNavigateAction('view-bookings')} className="text-violet-700">View all<ArrowRight className="ml-1 h-3.5 w-3.5"/></Button>}/>
-          <CardContent className="p-4 pt-2 sm:p-5 sm:pt-2">
-            {errors.bookings ? <EmptyCard icon={CalendarDays} title="Appointments unavailable" text={errors.bookings}/> : timeline.length===0 ? <EmptyCard icon={CalendarDays} title="No appointments today" text="New appointments will appear here in time order."/> : <div className="space-y-1">{timeline.map(event=>{const status=bookingStatus(event);return <button key={event.id} type="button" onClick={()=>onDrill?.({type:'event',eventId:event.id})} className="grid w-full grid-cols-[58px_1fr_auto] items-center gap-3 rounded-xl px-2 py-3 text-left transition hover:bg-violet-50/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><div className="rounded-xl bg-amber-50 px-2 py-2 text-center text-[11px] font-bold text-amber-700">{String(event.booking?.appointment_time||'--:--').slice(0,5)}</div><div className="min-w-0"><div className="truncate text-sm font-semibold text-slate-900">{event.customer||'Guest'}</div><div className="truncate text-xs text-slate-500">{event.service_name||'Service'}{event.booking?.duration_minutes?` · ${event.booking.duration_minutes} min`:''}</div><div className="mt-0.5 truncate text-[11px] text-slate-400">{event.therapist||'Therapist unassigned'}</div></div><StatusBadge status={status}/></button>})}</div>}
+          <CardContent className="p-4 pt-1">
+            {errors.bookings ? <EmptyCard icon={CalendarDays} title="Appointments unavailable" text={errors.bookings}/> : timeline.length===0 ? <EmptyCard icon={CalendarDays} title="No appointments today" text="New appointments will appear here in time order."/> : <div>{timeline.map(event=>{const status=bookingStatus(event);return <button key={event.id} type="button" onClick={()=>onDrill?.({type:'event',eventId:event.id})} className="grid w-full grid-cols-[52px_1fr_auto] items-center gap-3 border-b border-slate-100 px-1 py-2.5 text-left transition last:border-0 hover:bg-violet-50/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><div className="rounded-lg bg-amber-50 px-1.5 py-1.5 text-center text-[10px] font-bold text-amber-700">{String(event.booking?.appointment_time||'--:--').slice(0,5)}</div><div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-900">{event.customer||'Guest'}</div><div className="truncate text-[11px] text-slate-500">{event.service_name||'Service'}{event.booking?.duration_minutes?` · ${event.booking.duration_minutes} min`:''}</div><div className="mt-0.5 truncate text-[10px] text-slate-400">{event.therapist||'Therapist unassigned'}</div></div><StatusBadge status={status}/></button>})}{appointmentTimeline.length>timeline.length && <button type="button" onClick={()=>onNavigateAction('view-bookings')} className="mt-2 text-[11px] font-medium text-violet-700 hover:text-violet-900">+{appointmentTimeline.length-timeline.length} more appointments</button>}</div>}
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
+        <Card className={SURFACE}>
           <SectionHeading title="Top Services" subtitle="Ranked by valid bookings" control={<Select value={topPeriod} onValueChange={setTopPeriod}><SelectTrigger className="h-8 w-[112px] rounded-xl text-xs"><SelectValue/></SelectTrigger><SelectContent><SelectItem value="today">Today</SelectItem><SelectItem value="week">This Week</SelectItem><SelectItem value="month">This Month</SelectItem></SelectContent></Select>}/>
-          <CardContent className="p-5 pt-2">
-            {serviceLoading ? <div className="space-y-4">{Array.from({length:4},(_,i)=><Skeleton key={i} className="h-11 rounded-xl"/>)}</div> : errors.services ? <EmptyCard title="Services unavailable" text={errors.services}/> : topServices.length===0 ? <EmptyCard icon={Sparkles} title="No services yet" text="Completed service activity will appear here."/> : <div className="space-y-4">{topServices.map((item,index)=><div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-xs"><span className="min-w-0 truncate font-medium text-slate-700"><span className="mr-1.5 text-slate-400">{index+1}.</span>{item.name}</span><strong className="shrink-0 text-slate-900">{item.bookings} {item.bookings===1?'booking':'bookings'}</strong></div><div className="h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-indigo-500" style={{width:`${Math.max(8,item.bookings/maxServiceBookings*100)}%`}}/></div></div>)}</div>}
+          <CardContent className="p-4 pt-2">
+            {serviceLoading ? <div className="space-y-3">{Array.from({length:4},(_,i)=><Skeleton key={i} className="h-9 rounded-xl"/>)}</div> : errors.services ? <EmptyCard title="Services unavailable" text={errors.services}/> : topServices.length===0 ? <EmptyCard icon={Sparkles} title="No services yet" text="Completed service activity will appear here."/> : <div className="space-y-3">{topServices.map((item,index)=><div key={item.name}><div className="mb-1.5 flex items-center justify-between gap-3 text-[11px]"><span className="min-w-0 truncate font-medium text-slate-700"><span className="mr-1.5 text-slate-400">{index+1}.</span>{item.name}</span><strong className="shrink-0 text-slate-900">{item.bookings} {item.bookings===1?'booking':'bookings'}</strong></div><div className="h-1 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-[#9b8af3] to-[#779eea]" style={{width:`${Math.max(8,item.bookings/maxServiceBookings*100)}%`}}/></div></div>)}</div>}
           </CardContent>
         </Card>
 
-        <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
+        <Card className={SURFACE}>
           <SectionHeading title="Quick Actions" subtitle={isSuperAdmin?'Review centre operations':'Open an existing workflow'}/>
-          <CardContent className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 p-4 pt-2 sm:p-5 sm:pt-2">
+          <CardContent className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-2.5 p-4 pt-2">
             {isSuperAdmin ? <><QuickAction icon={CalendarDays} label="View Bookings" tone="violet" onClick={()=>onNavigateAction('view-bookings')}/><QuickAction icon={BookOpen} label="Master Register" tone="indigo" onClick={()=>onNavigateAction('register')}/><QuickAction icon={WalletCards} label="Cash Book" tone="amber" onClick={()=>onNavigateAction('cashbook')}/><QuickAction icon={Receipt} label="Reports" tone="emerald" onClick={()=>onNavigateAction('reports')}/></> : <><QuickAction icon={CalendarPlus} label="New Booking" tone="violet" onClick={()=>onNavigateAction('new-booking')}/><QuickAction icon={UserRound} label="Walk-in" tone="emerald" onClick={()=>onNavigateAction('walk-in')}/><QuickAction icon={Receipt} label="Add Expense" tone="rose" onClick={()=>onNavigateAction('expense')}/><QuickAction icon={Sparkles} label="Membership" tone="blue" onClick={()=>onNavigateAction('membership')}/><QuickAction icon={Gift} label="Gift Card" tone="indigo" onClick={()=>onNavigateAction('gift-card')}/><QuickAction icon={LockKeyhole} label="Daily Closing" tone="amber" onClick={()=>onNavigateAction('close')}/></>}
           </CardContent>
         </Card>
       </div>
 
-      <Card className="min-w-0 overflow-hidden border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
+      <Card className={SURFACE}>
         <SectionHeading title={`Monthly Snapshot · ${new Intl.DateTimeFormat('en-IN',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${date.slice(0,7)}-01T00:00:00Z`))}`} subtitle="Verified totals from the existing reporting engine"/>
-        <CardContent data-mobile-columns="2" className="grid grid-cols-2 gap-px bg-slate-100 p-0 xl:grid-cols-3 2xl:grid-cols-6">
-          {errors.monthly ? <div className="col-span-full bg-white p-8 text-center text-sm text-slate-500">{errors.monthly}</div> : monthMetrics.map(([label,current,previous,isMoney,metric],index)=><button type="button" key={label} onClick={()=>onDrill?.({type:'metric',metric,centre_id:centreId,from:monthStart(date),to:monthEnd(date)})} className="bg-white p-3 text-left transition hover:bg-violet-50/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:p-5"><div className="text-[9px] font-semibold uppercase tracking-[0.09em] text-slate-500 sm:text-[10px] sm:tracking-[0.11em]">{label}</div><div className="mt-2 text-lg font-bold text-slate-950 sm:text-xl">{isMoney?formatMoney(current):Number(current||0).toLocaleString('en-IN')}</div><div className="mt-2 text-[10px] font-medium sm:text-[11px]"><Delta current={current} previous={previous} suffix="vs last month" compact/></div><div className="mt-4 h-7"><ResponsiveContainer width="100%" height="100%"><AreaChart data={[{period:'Previous',value:Number(previous||0)},{period:'Current',value:Number(current||0)}]}><defs><linearGradient id={`snapshot-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0.25}/><stop offset="95%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0}/></linearGradient></defs><Area type="monotone" dataKey="value" stroke={index===5?'#f43f5e':'#8b5cf6'} fill={`url(#snapshot-${index})`} strokeWidth={2} dot={false}/></AreaChart></ResponsiveContainer></div></button>)}
+        <CardContent data-mobile-columns="2" className="grid grid-cols-2 gap-px bg-slate-100/80 p-0 md:grid-cols-3 xl:grid-cols-6">
+          {errors.monthly ? <div className="col-span-full bg-white p-8 text-center text-sm text-slate-500">{errors.monthly}</div> : monthMetrics.map(([label,current,previous,isMoney,metric],index)=><button type="button" key={label} onClick={()=>onDrill?.({type:'metric',metric,centre_id:centreId,from:monthStart(date),to:monthEnd(date)})} className="bg-white p-3.5 text-left transition hover:bg-violet-50/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><div className="text-[9px] font-semibold uppercase tracking-[0.09em] text-slate-500">{label}</div><div className="mt-1.5 text-base font-bold text-slate-950 sm:text-lg">{isMoney?formatMoney(current):Number(current||0).toLocaleString('en-IN')}</div><div className="mt-1.5 text-[10px] font-medium"><Delta current={current} previous={previous} suffix="vs last month" compact/></div><div className="mt-2.5 h-6"><ResponsiveContainer width="100%" height="100%"><AreaChart data={[{period:'Previous',value:Number(previous||0)},{period:'Current',value:Number(current||0)}]}><defs><linearGradient id={`snapshot-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={index===5?'#e9879a':'#9182ec'} stopOpacity={0.22}/><stop offset="95%" stopColor={index===5?'#e9879a':'#9182ec'} stopOpacity={0}/></linearGradient></defs><Area type="monotone" dataKey="value" stroke={index===5?'#e9879a':'#9182ec'} fill={`url(#snapshot-${index})`} strokeWidth={1.7} dot={false}/></AreaChart></ResponsiveContainer></div></button>)}
         </CardContent>
       </Card>
     </div>

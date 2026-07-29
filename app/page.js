@@ -2252,9 +2252,9 @@ function App() {
             </div>
           </header>
 
-          <main id="main-content" className="app-content min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7" tabIndex={-1}>
+          <main id="main-content" className={`app-content min-w-0 flex-1 overflow-y-auto ${view === 'dashboard' ? 'px-3 py-4 sm:px-5 sm:py-5 lg:px-6' : 'px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7'}`} tabIndex={-1}>
             <div className="mx-auto w-full max-w-[1600px]">
-              <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground md:flex">
+              {view !== 'dashboard' && <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground md:flex">
                 <Icon className="h-4 w-4 text-amber-500"/>
                 <span className="font-semibold text-foreground">{currentView.label}</span>
                 <span className="mx-1.5 text-border">/</span>
@@ -2262,8 +2262,8 @@ function App() {
                 <span className="ml-auto rounded-lg border border-border/40 bg-muted/40 px-2 py-1 font-mono text-xs text-muted-foreground">
                   {new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}
                 </span>
-                {view !== 'dashboard' && <AppProfileMenu {...{profile,centre}} onAction={handleProfileAction} className="ml-2"/>}
-              </div>
+                <AppProfileMenu {...{profile,centre}} onAction={handleProfileAction} className="ml-2"/>
+              </div>}
 
               <div key={`${view}-${centre.id}`} className="view-surface">
                 {view==='dashboard'  && <DashboardView {...props} />}
