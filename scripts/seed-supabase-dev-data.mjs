@@ -14,9 +14,15 @@ if (fs.existsSync(envPath)) {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://zciclpvqrklutlvgcfig.supabase.co'
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+const seedPasswords = {
+  admin: process.env.SEED_ADMIN_PASSWORD,
+  phoenix: process.env.SEED_PHOENIX_PASSWORD,
+  holiday: process.env.SEED_HOLIDAY_PASSWORD,
+  lulu: process.env.SEED_LULU_PASSWORD,
+}
 
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error('Missing Supabase Service Role Key or URL.')
+if (!supabaseUrl || !serviceRoleKey || Object.values(seedPasswords).some(password => !password)) {
+  console.error('Missing Supabase configuration or SEED_*_PASSWORD values.')
   process.exit(1)
 }
 
@@ -31,10 +37,10 @@ const APPROVED_CENTRES = [
 ]
 
 const SEED_USERS = [
-  { email: 'admin@moroccanspa.in', password: 'SuperSecretPassword123!', full_name: 'System Super Admin', role: 'SUPER_ADMIN', centre_id: null },
-  { email: 'phoenix@moroccanspa.in', password: 'PhoenixPassword123!', full_name: 'Phoenix Manager', role: 'CENTRE_USER', centre_id: 'b7b09f2b-4b4d-4ce7-8289-08947347af9b' },
-  { email: 'holidayinn@moroccanspa.in', password: 'HolidayPassword123!', full_name: 'Holiday Inn Manager', role: 'CENTRE_USER', centre_id: 'd15176b8-418e-4c76-a9eb-a2d2947ba5d9' },
-  { email: 'lulumall@moroccanspa.in', password: 'LuluPassword123!', full_name: 'Lulu Mall Manager', role: 'CENTRE_USER', centre_id: 'dc39e202-1bac-4411-9988-2bcaa72728d6' }
+  { email: 'admin@moroccanspa.in', password: seedPasswords.admin, full_name: 'System Super Admin', role: 'SUPER_ADMIN', centre_id: null },
+  { email: 'phoenix@moroccanspa.in', password: seedPasswords.phoenix, full_name: 'Phoenix Manager', role: 'CENTRE_USER', centre_id: 'b7b09f2b-4b4d-4ce7-8289-08947347af9b' },
+  { email: 'holidayinn@moroccanspa.in', password: seedPasswords.holiday, full_name: 'Holiday Inn Manager', role: 'CENTRE_USER', centre_id: 'd15176b8-418e-4c76-a9eb-a2d2947ba5d9' },
+  { email: 'lulumall@moroccanspa.in', password: seedPasswords.lulu, full_name: 'Lulu Mall Manager', role: 'CENTRE_USER', centre_id: 'dc39e202-1bac-4411-9988-2bcaa72728d6' }
 ]
 
 const SERVICES = [

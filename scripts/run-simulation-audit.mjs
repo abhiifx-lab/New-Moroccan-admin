@@ -15,6 +15,11 @@ if (fs.existsSync(envPath)) {
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+const auditAdminEmail = process.env.AUDIT_ADMIN_EMAIL || 'admin@moroccanspa.in'
+const auditAdminPassword = process.env.AUDIT_ADMIN_PASSWORD
+if (!supabaseUrl || !serviceRoleKey || !auditAdminPassword) {
+  throw new Error('Missing Supabase configuration or AUDIT_ADMIN_PASSWORD')
+}
 const EXECUTION_TAG = 'SIM-JULY-2026-' + Math.random().toString(36).substring(2, 10).toUpperCase()
 const TAG = EXECUTION_TAG
 
@@ -111,8 +116,8 @@ async function run() {
   // 1. Log in as Super Admin to get Token
   console.log('Logging in as Super Admin...')
   const loginRes = await apiCall('/auth/login', 'POST', {
-    email: 'admin@moroccanspa.in',
-    password: 'SuperSecretPassword123!'
+    email: auditAdminEmail,
+    password: auditAdminPassword
   })
   const token = loginRes.token
   console.log('Login successful!')

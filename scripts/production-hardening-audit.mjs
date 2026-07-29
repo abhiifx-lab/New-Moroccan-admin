@@ -20,8 +20,15 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://zciclpvrql
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-if (!SERVICE_ROLE_KEY || !ANON_KEY) {
-  console.error('❌ Missing Supabase keys in .env.local')
+const AUDIT_PASSWORDS = {
+  admin: process.env.AUDIT_ADMIN_PASSWORD,
+  phoenix: process.env.AUDIT_PHOENIX_PASSWORD,
+  holiday: process.env.AUDIT_HOLIDAY_PASSWORD,
+  lulu: process.env.AUDIT_LULU_PASSWORD,
+}
+
+if (!SERVICE_ROLE_KEY || !ANON_KEY || Object.values(AUDIT_PASSWORDS).some(password => !password)) {
+  console.error('❌ Missing Supabase keys or AUDIT_*_PASSWORD values in .env.local')
   process.exit(1)
 }
 
@@ -129,10 +136,10 @@ async function runProductionAudit() {
   assert(badErr !== null, 'Invalid login credentials correctly rejected')
 
   const accounts = [
-    { email: 'admin@moroccanspa.in', pw: 'SuperSecretPassword123!', role: 'SUPER_ADMIN', name: 'Super Admin' },
-    { email: 'phoenix@moroccanspa.in', pw: 'PhoenixPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[0], name: 'Phoenix Manager' },
-    { email: 'holidayinn@moroccanspa.in', pw: 'HolidayPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[1], name: 'Holiday Manager' },
-    { email: 'lulumall@moroccanspa.in', pw: 'LuluPassword123!', role: 'CENTRE_USER', centre: APPROVED_CENTRES[2], name: 'Lulu Manager' }
+    { email: 'admin@moroccanspa.in', pw: AUDIT_PASSWORDS.admin, role: 'SUPER_ADMIN', name: 'Super Admin' },
+    { email: 'phoenix@moroccanspa.in', pw: AUDIT_PASSWORDS.phoenix, role: 'CENTRE_USER', centre: APPROVED_CENTRES[0], name: 'Phoenix Manager' },
+    { email: 'holidayinn@moroccanspa.in', pw: AUDIT_PASSWORDS.holiday, role: 'CENTRE_USER', centre: APPROVED_CENTRES[1], name: 'Holiday Manager' },
+    { email: 'lulumall@moroccanspa.in', pw: AUDIT_PASSWORDS.lulu, role: 'CENTRE_USER', centre: APPROVED_CENTRES[2], name: 'Lulu Manager' }
   ]
 
   const clients = {}
