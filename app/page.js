@@ -37,6 +37,13 @@ const todayStr = () => {
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(d)
   return `${parts.find(p=>p.type==='year').value}-${parts.find(p=>p.type==='month').value}-${parts.find(p=>p.type==='day').value}`
 }
+const nearestAppointmentTime = () => {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date())
+  const hour = Number(parts.find(p=>p.type==='hour')?.value || 0)
+  const minute = Number(parts.find(p=>p.type==='minute')?.value || 0)
+  const rounded = Math.ceil((hour * 60 + minute + 1) / 15) * 15
+  return `${String(Math.floor((rounded % 1440) / 60)).padStart(2,'0')}:${String(rounded % 60).padStart(2,'0')}`
+}
 
 let authToken = typeof window !== 'undefined' ? localStorage.getItem('sb_auth_token') || '' : ''
 function setAuthToken(t) {
@@ -55,6 +62,11 @@ const apiGet = async (path) => {
 const apiPost = async (path, body) => {
   const headers = { 'Content-Type':'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
   const r = await fetch('/api'+path, { method:'POST', headers, body: JSON.stringify(body) })
+  return r.json()
+}
+const apiPatch = async (path, body) => {
+  const headers = { 'Content-Type':'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) }
+  const r = await fetch('/api'+path, { method:'PATCH', headers, body: JSON.stringify(body) })
   return r.json()
 }
 
@@ -80,7 +92,6 @@ const NAV = [
   { id: 'audit',       label: 'Audit Log',       icon: ShieldCheck },
 ]
 
-const BOOKING_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD','MIXED','MEMBERSHIP','GIFT_CARD']
 const SALE_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD']
 const EXPENSE_CATEGORIES = ['Utilities','Supplies','Salaries','Wages','Rent','Marketing','Maintenance','Consumables','Other']
 const ALL_CENTRES = { id: 'ALL', name: 'All Centres' }
@@ -318,6 +329,19 @@ function MiniStat({ label, value, accent }) {
 function EventStage({ ev, onReverse, role, onOpenRelated }) {
   const li = ev.ledger_impact || {}
   const canReverse = !ev.is_reversal && !ev.reversed
+  const [receiptOpen, setReceiptOpen] = useState(false)
+  const [receiptNo, setReceiptNo] = useState(ev.booking?.physical_receipt_no || '')
+  const [savingReceipt, setSavingReceipt] = useState(false)
+  useEffect(() => { setReceiptNo(ev.booking?.physical_receipt_no || '') }, [ev.id, ev.booking?.physical_receipt_no])
+  const saveReceipt = async () => {
+    setSavingReceipt(true)
+    const result = await apiPatch(`/bookings/${ev.id}/receipt`, { physical_receipt_no: receiptNo })
+    setSavingReceipt(false)
+    if (result.error) return toast.error(result.error)
+    setReceiptNo(result.booking?.physical_receipt_no || '')
+    setReceiptOpen(false)
+    toast.success('Physical receipt number updated and audited')
+  }
   return (
     <div className="space-y-4">
       {/* Header banner */}
@@ -348,6 +372,14 @@ function EventStage({ ev, onReverse, role, onOpenRelated }) {
             {ev.customer && <KV k="Customer" v={ev.customer}/>}
             {ev.therapist && <KV k="Therapist" v={ev.therapist}/>}
             {ev.service_name && <KV k="Service" v={ev.service_name}/>}
+            {ev.booking?.appointment_date && <KV k="Appointment" v={`${ev.booking.appointment_date} • ${String(ev.booking.appointment_time || '').slice(0,5)}`}/>}
+            {ev.booking?.duration_minutes && <KV k="Duration" v={`${ev.booking.duration_minutes} minutes`}/>}
+            {ev.type === 'BOOKING' && <KV k="Physical Receipt" v={
+              <span className="inline-flex items-center gap-2">
+                <span>{receiptNo || '—'}</span>
+                {['MANAGER','OPS','SUPER'].includes(role) && <Button variant="ghost" size="sm" className="h-6 px-2" onClick={()=>setReceiptOpen(true)}>Edit</Button>}
+              </span>
+            }/>}
             {ev.category && <KV k="Category" v={ev.category}/>}
             {ev.vendor && <KV k="Vendor" v={ev.vendor}/>}
             {ev.movement_type && <KV k="Movement" v={ev.movement_type.replace(/_/g,' ')}/>}
@@ -406,6 +438,27 @@ function EventStage({ ev, onReverse, role, onOpenRelated }) {
           </Card>
         )}
       </div>
+
+      {ev.type === 'BOOKING' && ev.booking && (
+        <Card><CardHeader className="py-3"><CardTitle className="text-sm">Appointment &amp; Sale Summary</CardTitle></CardHeader>
+          <CardContent className="pt-0 text-sm grid md:grid-cols-2 gap-x-6 gap-y-1.5">
+            <KV k="Base Price" v={formatINR(ev.booking.base_price_paise)}/>
+            <KV k="Offer" v={ev.booking.offer_code || '—'}/>
+            <KV k="Offer Discount" v={formatINR(ev.booking.discount_paise)}/>
+            <KV k="Membership Redemption" v={formatINR(ev.booking.membership_redemption_paise)}/>
+            <KV k="Gift Card Redemption" v={formatINR(ev.booking.gift_card_redemption_paise)}/>
+            <KV k="Final Receivable" v={<b>{formatINR(ev.booking.final_receivable_paise)}</b>}/>
+          </CardContent>
+        </Card>
+      )}
+
+      <Dialog open={receiptOpen} onOpenChange={setReceiptOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Physical Receipt Number</DialogTitle><DialogDescription>This operational reference is unique within the centre. Every change is audited.</DialogDescription></DialogHeader>
+          <Field l="Physical Receipt No."><Input value={receiptNo} onChange={e=>setReceiptNo(e.target.value)} /></Field>
+          <DialogFooter><Button variant="outline" onClick={()=>setReceiptOpen(false)}>Cancel</Button><Button onClick={saveReceipt} disabled={savingReceipt}>{savingReceipt?'Saving…':'Save Receipt'}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Reversal linkage */}
       {(ev.reversal_event || ev.original_event) && (
@@ -593,96 +646,180 @@ function DashboardView({ centre, refreshTick, onDrill }) {
 // BOOKING
 // ============================================================================
 function BookingView({ centre, centres, role, bump, onDrill, refreshTick }) {
-  const [services, setServices] = useState([])
+  const blankForm = () => ({
+    customer_phone:'', customer_name:'', customer_email:'', treatment_name:'', service_id:'', therapist_id:'',
+    appointment_date:todayStr(), appointment_time:nearestAppointmentTime(), offer_code:'', payment_method:'CASH',
+    physical_receipt_no:'', use_membership:false, membership_code:'', use_gift_card:false, gift_card_code:''
+  })
+  const [variants, setVariants] = useState([])
+  const [therapists, setTherapists] = useState([])
   const [events, setEvents] = useState([])
   const [open, setOpen] = useState(false)
+  const [f, setF] = useState(blankForm)
+  const [customerData, setCustomerData] = useState(null)
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [treatmentSearch, setTreatmentSearch] = useState('')
+  const [appliedOffer, setAppliedOffer] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [tableSearch, setTableSearch] = useState('')
   const isAllCentres = centre?.id === 'ALL'
   const centreName = (id) => centres.find(c => c.id === id)?.name || id
-  const [f, setF] = useState({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi_1:'', mix_upi_2:'', mix_card:'', redemption_ref:'' })
   const load = async () => {
-    const [s, e] = await Promise.all([apiGet('/services'), apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=BOOKING`)])
-    setServices(s); setEvents(e)
+    const eventRequest = apiGet(`/events?centre_id=${centre.id}&date=${todayStr()}&type=BOOKING`)
+    if (isAllCentres) {
+      const e = await eventRequest
+      setEvents(Array.isArray(e) ? e : [])
+      return
+    }
+    const [options, e] = await Promise.all([apiGet(`/appointment/options?centre_id=${centre.id}`), eventRequest])
+    if (options.error) toast.error(options.error)
+    setVariants(Array.isArray(options.variants) ? options.variants : [])
+    setTherapists(Array.isArray(options.therapists) ? options.therapists : [])
+    setEvents(Array.isArray(e) ? e : [])
   }
   useEffect(() => { if (centre?.id) load() }, [centre?.id, refreshTick])
+  useEffect(() => {
+    const phone = f.customer_phone.replace(/\D/g, '')
+    if (phone.length < 10) { setCustomerData(null); return }
+    const timer = setTimeout(async () => {
+      setLookupLoading(true)
+      const result = await apiGet(`/customers/lookup?phone=${encodeURIComponent(phone)}`)
+      setLookupLoading(false)
+      if (result.error) return toast.error(result.error)
+      setCustomerData(result)
+      if (result.found) {
+        setF(current => ({ ...current, customer_name: result.customer.name || '', customer_email: result.customer.email || '',
+          membership_code: result.memberships?.[0]?.code || '', gift_card_code: result.gift_cards?.[0]?.code || '' }))
+      }
+    }, 450)
+    return () => clearTimeout(timer)
+  }, [f.customer_phone])
   const reversedIds = useMemo(() => new Set(events.filter(x=>x.is_reversal && x.reverses).map(x=>x.reverses)), [events])
+  const treatments = useMemo(() => [...new Set(variants.map(v => v.treatment_name || v.name))].filter(name => name.toLowerCase().includes(treatmentSearch.toLowerCase())), [variants, treatmentSearch])
+  const treatmentVariants = variants.filter(v => (v.treatment_name || v.name) === f.treatment_name)
+  const selectedVariant = variants.find(v => v.id === f.service_id)
+  const selectedTherapist = therapists.find(t => t.id === f.therapist_id)
+  const basePrice = Number(selectedVariant?.price_paise || 0)
+  const offerDiscount = Number(appliedOffer?.discount_paise || 0)
+  const afterDiscount = Math.max(0, basePrice - offerDiscount)
+  const selectedMembership = (customerData?.memberships || []).find(m => m.code === f.membership_code)
+  const membershipRedemption = f.use_membership ? Math.min(Number(selectedMembership?.remaining_paise || 0), afterDiscount) : 0
+  const selectedGiftCard = (customerData?.gift_cards || []).find(g => g.code === f.gift_card_code)
+  const giftCardRedemption = f.use_gift_card ? Math.min(Number(selectedGiftCard?.remaining_paise || 0), Math.max(0, afterDiscount - membershipRedemption)) : 0
+  const finalReceivable = Math.max(0, afterDiscount - membershipRedemption - giftCardRedemption)
+  const visibleEvents = events.filter(e => {
+    const term = tableSearch.trim().toLowerCase()
+    if (!term) return true
+    return [e.customer, e.customer_phone, e.service_name, e.therapist, e.booking?.physical_receipt_no].some(value => String(value || '').toLowerCase().includes(term))
+  })
+
+  const applyOffer = async () => {
+    if (!f.offer_code.trim()) { setAppliedOffer(null); return toast.error('Enter a coupon or offer code') }
+    if (!f.service_id) return toast.error('Select a duration and price first')
+    const result = await apiPost('/offers/validate', { centre_id: centre.id, code: f.offer_code, service_id: f.service_id })
+    if (result.error) { setAppliedOffer(null); return toast.error(result.error) }
+    setAppliedOffer(result)
+    toast.success(`${result.offer.name} applied`)
+  }
 
   const submit = async () => {
-    const svc = services.find(x => x.id === f.service_id)
-    const amount = toPaise(f.amount || (svc ? svc.price_paise/100 : 0))
-    const body = {
-      centre_id: centre.id, created_by: role, role,
-      customer: f.customer, therapist: f.therapist,
-      service_id: f.service_id, service_name: svc?.name || '',
-      amount, payment_method: f.payment_method,
-      redemption_ref: f.redemption_ref || null,
-    }
-    if (f.payment_method === 'MIXED') body.payment_breakdown = { cash: toPaise(f.mix_cash), upi_1: toPaise(f.mix_upi_1), upi_2: toPaise(f.mix_upi_2), card: toPaise(f.mix_card) }
-    const r = await apiPost('/events/booking', body)
-    if (r.error) { toast.error(r.error); return }
-    toast.success('Booking recorded')
-    setOpen(false); setF({ customer:'', therapist:'', service_id:'', amount:'', payment_method:'CASH', mix_cash:'', mix_upi_1:'', mix_upi_2:'', mix_card:'', redemption_ref:'' })
+    if (f.customer_phone.replace(/\D/g, '').length < 10) return toast.error('Enter a valid mobile number')
+    if (!f.customer_name.trim()) return toast.error('Customer name is required')
+    if (!selectedVariant) return toast.error('Select a treatment variant')
+    if (!selectedTherapist) return toast.error('Select a therapist')
+    if (!f.appointment_date || !f.appointment_time) return toast.error('Select appointment date and time')
+    setSubmitting(true)
+    const r = await apiPost('/appointments', {
+      centre_id: centre.id, customer_phone:f.customer_phone, customer_name:f.customer_name, customer_email:f.customer_email,
+      service_id:f.service_id, therapist_id:f.therapist_id, appointment_date:f.appointment_date, appointment_time:f.appointment_time,
+      offer_code:appliedOffer ? f.offer_code : '', membership_code:f.use_membership?f.membership_code:'', membership_redemption_paise:membershipRedemption,
+      gift_card_code:f.use_gift_card?f.gift_card_code:'', gift_card_redemption_paise:giftCardRedemption,
+      payment_method:f.payment_method, physical_receipt_no:f.physical_receipt_no
+    })
+    setSubmitting(false)
+    if (r.error) return toast.error(r.error)
+    toast.success('Appointment confirmed and sale recorded')
+    setOpen(false); setF(blankForm()); setCustomerData(null); setAppliedOffer(null); setTreatmentSearch('')
     bump(); load()
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h2 className="text-2xl font-semibold">Bookings</h2><p className="text-sm text-muted-foreground">Every booking creates one immutable event. Click any row for full detail + reverse.</p></div>
+        <div><h2 className="text-2xl font-semibold">Appointments &amp; Sales</h2><p className="text-sm text-muted-foreground">Customer-led appointment entry with one immutable financial event.</p></div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={()=>window.open(`/api/bookings/export?centre_id=${centre.id}&date=${todayStr()}`,'_blank')}><Download className="h-4 w-4 mr-2"/>Export</Button>
         {!isAllCentres && <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>New Booking</Button></DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>New Booking — {centre.name}</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-3">
-              <Field l="Customer"><Input value={f.customer} onChange={e=>setF({...f, customer:e.target.value})}/></Field>
-              <Field l="Therapist"><Input value={f.therapist} onChange={e=>setF({...f, therapist:e.target.value})}/></Field>
-              <Field l="Service">
-                <Select value={f.service_id} onValueChange={v=>{ const s = services.find(x=>x.id===v); setF({...f, service_id:v, amount: s? (s.price_paise/100).toString() : f.amount})}}>
-                  <SelectTrigger><SelectValue placeholder="Choose"/></SelectTrigger>
-                  <SelectContent>{services.map(s=><SelectItem key={s.id} value={s.id}>{s.name} — {formatINR(s.price_paise)}</SelectItem>)}</SelectContent>
-                </Select>
-              </Field>
-              <Field l="Amount (₹)"><Input type="number" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/></Field>
-              <Field l="Payment">
-                <Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}>
-                  <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>{BOOKING_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent>
-                </Select>
-              </Field>
-              {(f.payment_method==='MEMBERSHIP'||f.payment_method==='GIFT_CARD') && (
-                <Field l={f.payment_method==='MEMBERSHIP'?'Membership Code':'Gift Card Code'}>
-                  <Input value={f.redemption_ref} onChange={e=>setF({...f, redemption_ref:e.target.value})}/>
-                </Field>
-              )}
-            </div>
-            {f.payment_method==='MIXED' && (
-              <div className="grid grid-cols-4 gap-3 mt-2">
-                <Field l="Cash (₹)"><Input type="number" value={f.mix_cash} onChange={e=>setF({...f, mix_cash:e.target.value})}/></Field>
-                <Field l="UPI 1 (₹)"><Input type="number" value={f.mix_upi_1} onChange={e=>setF({...f, mix_upi_1:e.target.value})}/></Field>
-                <Field l="UPI 2 (₹)"><Input type="number" value={f.mix_upi_2} onChange={e=>setF({...f, mix_upi_2:e.target.value})}/></Field>
-                <Field l="Card (₹)"><Input type="number" value={f.mix_card} onChange={e=>setF({...f, mix_card:e.target.value})}/></Field>
+          <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2"/>New Appointment</Button></DialogTrigger>
+          <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto">
+            <DialogHeader><DialogTitle>New Appointment &amp; Sale Entry — {centre.name}</DialogTitle><DialogDescription>Mobile number finds the customer. Treatment pricing and financial entries are calculated automatically.</DialogDescription></DialogHeader>
+            <div className="grid lg:grid-cols-[2fr_1fr] gap-5">
+              <div className="space-y-4">
+                <Card className="border-amber-500/40 bg-amber-500/5"><CardHeader className="py-3"><CardTitle className="text-sm">1. Customer</CardTitle></CardHeader><CardContent className="grid md:grid-cols-3 gap-3 pt-0">
+                  <Field l="Mobile Number"><Input autoFocus inputMode="tel" value={f.customer_phone} onChange={e=>setF({...f,customer_phone:e.target.value})} placeholder="10-digit mobile"/></Field>
+                  <Field l="Customer Name"><Input value={f.customer_name} onChange={e=>setF({...f,customer_name:e.target.value})}/></Field>
+                  <Field l="Email (Optional)"><Input type="email" value={f.customer_email} onChange={e=>setF({...f,customer_email:e.target.value})}/></Field>
+                  <div className="md:col-span-3 text-xs text-muted-foreground">{lookupLoading?'Looking up customer…':customerData?.found?'Existing customer loaded':'Enter a mobile number to find or create a customer'}</div>
+                </CardContent></Card>
+
+                {customerData?.found && <Card><CardHeader className="py-3"><CardTitle className="text-sm">Customer Intelligence</CardTitle></CardHeader><CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-0">
+                  <MiniStat label="Previous Visits" value={customerData.intelligence?.previous_visits || 0}/><MiniStat label="Last Visit" value={customerData.intelligence?.last_visit?new Date(customerData.intelligence.last_visit).toLocaleDateString('en-IN'):'—'}/>
+                  <MiniStat label="Preferred Therapist" value={customerData.intelligence?.preferred_therapist || '—'}/><MiniStat label="Lifetime Spend" value={formatINR(customerData.intelligence?.lifetime_spend_paise)}/>
+                  <MiniStat label="Membership Balance" value={formatINR(customerData.intelligence?.membership_balance_paise)}/><MiniStat label="Gift Card Balance" value={formatINR(customerData.intelligence?.gift_card_balance_paise)}/>
+                </CardContent></Card>}
+
+                <Card><CardHeader className="py-3"><CardTitle className="text-sm">2. Treatment &amp; Therapist</CardTitle></CardHeader><CardContent className="grid md:grid-cols-2 gap-3 pt-0">
+                  <Field l="Search Treatment"><Input value={treatmentSearch} onChange={e=>setTreatmentSearch(e.target.value)} placeholder="Type treatment name"/></Field>
+                  <Field l="Treatment"><Select value={f.treatment_name} onValueChange={v=>{setF({...f,treatment_name:v,service_id:''});setAppliedOffer(null)}}><SelectTrigger><SelectValue placeholder="Choose treatment"/></SelectTrigger><SelectContent>{treatments.map(name=><SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select></Field>
+                  <Field l="Duration & Price"><Select value={f.service_id} onValueChange={v=>{setF({...f,service_id:v});setAppliedOffer(null)}}><SelectTrigger><SelectValue placeholder="Choose variant"/></SelectTrigger><SelectContent>{treatmentVariants.map(v=><SelectItem key={v.id} value={v.id}>{v.variant_name || `${v.duration} Minutes`} • {formatINR(v.price_paise)}</SelectItem>)}</SelectContent></Select></Field>
+                  <Field l="Therapist"><Select value={f.therapist_id} onValueChange={v=>setF({...f,therapist_id:v})}><SelectTrigger><SelectValue placeholder="Choose therapist"/></SelectTrigger><SelectContent>{therapists.map(t=><SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}</SelectContent></Select></Field>
+                </CardContent></Card>
+
+                <Card><CardHeader className="py-3"><CardTitle className="text-sm">3. Appointment &amp; Offer</CardTitle></CardHeader><CardContent className="grid md:grid-cols-2 gap-3 pt-0">
+                  <Field l="Appointment Date"><Input type="date" min={todayStr()} value={f.appointment_date} onChange={e=>setF({...f,appointment_date:e.target.value})}/></Field>
+                  <Field l="Appointment Time"><Input type="time" step="900" value={f.appointment_time} onChange={e=>setF({...f,appointment_time:e.target.value})}/></Field>
+                  <Field l="Coupon / Offer Code"><div className="flex gap-2"><Input value={f.offer_code} onChange={e=>{setF({...f,offer_code:e.target.value.toUpperCase()});setAppliedOffer(null)}}/><Button type="button" variant="outline" onClick={applyOffer}>Apply</Button></div></Field>
+                  <Field l="Physical Receipt No. (Optional)"><Input value={f.physical_receipt_no} onChange={e=>setF({...f,physical_receipt_no:e.target.value})}/></Field>
+                </CardContent></Card>
+
+                {(customerData?.memberships?.length>0 || customerData?.gift_cards?.length>0) && <Card><CardHeader className="py-3"><CardTitle className="text-sm">4. Stored Value Redemption</CardTitle></CardHeader><CardContent className="grid md:grid-cols-2 gap-4 pt-0">
+                  {customerData?.memberships?.length>0 && <div className="space-y-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.use_membership} onChange={e=>setF({...f,use_membership:e.target.checked})}/>Redeem Membership</label><Select value={f.membership_code} onValueChange={v=>setF({...f,membership_code:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{customerData.memberships.map(m=><SelectItem key={m.code} value={m.code}>{m.code} • {formatINR(m.remaining_paise)}</SelectItem>)}</SelectContent></Select></div>}
+                  {customerData?.gift_cards?.length>0 && <div className="space-y-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.use_gift_card} onChange={e=>setF({...f,use_gift_card:e.target.checked})}/>Redeem Gift Card</label><Select value={f.gift_card_code} onValueChange={v=>setF({...f,gift_card_code:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{customerData.gift_cards.map(g=><SelectItem key={g.code} value={g.code}>{g.code} • {formatINR(g.remaining_paise)}</SelectItem>)}</SelectContent></Select></div>}
+                </CardContent></Card>}
+
+                {finalReceivable>0 && <Card><CardHeader className="py-3"><CardTitle className="text-sm">5. Payment</CardTitle></CardHeader><CardContent className="pt-0"><Field l="Payment Method"><Select value={f.payment_method} onValueChange={v=>setF({...f,payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field></CardContent></Card>}
               </div>
-            )}
-            <DialogFooter><Button onClick={submit}>Record Booking</Button></DialogFooter>
+
+              <Card className="h-fit sticky top-0 border-amber-500/30"><CardHeader><CardTitle>Booking Summary</CardTitle></CardHeader><CardContent className="space-y-2 text-sm">
+                <Row k="Treatment" v={f.treatment_name || '—'}/><Row k="Variant" v={selectedVariant?.variant_name || (selectedVariant?`${selectedVariant.duration} Minutes`:'—')}/><Row k="Therapist" v={selectedTherapist?.name || '—'}/>
+                <div className="border-t border-border/50 my-2"/><Row k="Base Price" v={formatINR(basePrice)}/><Row k="Offer Discount" v={`− ${formatINR(offerDiscount)}`}/><Row k="Membership Redemption" v={`− ${formatINR(membershipRedemption)}`}/><Row k="Gift Card Redemption" v={`− ${formatINR(giftCardRedemption)}`}/><div className="border-t border-border/50 my-2"/><Row k="Final Receivable" v={formatINR(finalReceivable)} bold/>
+                {finalReceivable===0 && basePrice>0 && <Badge variant="secondary" className="w-full justify-center py-1">Fully covered by stored value</Badge>}
+                <Button className="w-full mt-4" size="lg" onClick={submit} disabled={submitting}>{submitting?'Confirming…':'Confirm Appointment'}</Button>
+              </CardContent></Card>
+            </div>
           </DialogContent>
         </Dialog>}
+        </div>
       </div>
 
+      <Input value={tableSearch} onChange={e=>setTableSearch(e.target.value)} placeholder="Search customer, mobile, treatment, therapist, or receipt number…" className="max-w-xl"/>
       <Card><CardContent className="p-0">
         <Table>
-          <TableHeader><TableRow><TableHead>Time</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Customer</TableHead><TableHead>Service</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Amount</TableHead><TableHead></TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>Appointment</TableHead>{isAllCentres && <TableHead>Centre</TableHead>}<TableHead>Receipt</TableHead><TableHead>Customer</TableHead><TableHead>Treatment</TableHead><TableHead>Therapist</TableHead><TableHead>Pay</TableHead><TableHead className="text-right">Receivable</TableHead><TableHead></TableHead></TableRow></TableHeader>
           <TableBody>
-            {events.length===0 && <TableRow><TableCell colSpan={isAllCentres?8:7} className="text-center text-muted-foreground py-6">No bookings today</TableCell></TableRow>}
-            {events.map(e=>(
+            {visibleEvents.length===0 && <TableRow><TableCell colSpan={isAllCentres?9:8} className="text-center text-muted-foreground py-6">No appointments today</TableCell></TableRow>}
+            {visibleEvents.map(e=>(
               <TableRow key={e.id} className={`cursor-pointer hover:bg-muted/50 ${e.is_reversal||reversedIds.has(e.id)?'opacity-70':''}`} onClick={()=>onDrill({ type:'event', eventId:e.id })}>
-                <TableCell className="text-xs">{new Date(e.created_at).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</TableCell>
+                <TableCell className="text-xs">{e.booking?.appointment_date || e.business_date}<br/>{String(e.booking?.appointment_time || '').slice(0,5)}</TableCell>
                 {isAllCentres && <TableCell className="text-xs">{centreName(e.centre_id)}</TableCell>}
+                <TableCell className="font-mono text-xs">{e.booking?.physical_receipt_no || '—'}</TableCell>
                 <TableCell>{e.customer}</TableCell><TableCell>{e.service_name}</TableCell><TableCell>{e.therapist}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{e.payment_method}</Badge>
                   {e.is_reversal && <Badge variant="destructive" className="ml-1 text-[10px]">REV</Badge>}
                   {reversedIds.has(e.id) && <Badge variant="outline" className="ml-1 text-[10px]">REVERSED</Badge>}
                 </TableCell>
-                <TableCell className="text-right font-medium">{(e.payment_method==='MEMBERSHIP'||e.payment_method==='GIFT_CARD')?<span className="text-muted-foreground">redeemed</span>:formatINR(e.amount)}</TableCell>
+                <TableCell className="text-right font-medium">{formatINR(e.booking?.final_receivable_paise ?? e.amount)}</TableCell>
                 <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground"/></TableCell>
               </TableRow>
             ))}
@@ -714,6 +851,7 @@ function MembershipView({ centre, centres, role, bump, refreshTick }) {
       centre_id: centre.id,
       buyer: f.customer.trim(),
       recipient: f.customer.trim(),
+      customer_phone: f.phone.trim(),
       price_paise: value,
       value_paise: value,
       payment_method: f.payment_method,
@@ -767,7 +905,7 @@ function GiftCardView({ centre, centres, role, bump, refreshTick }) {
   const [open, setOpen] = useState(false)
   const isAllCentres = centre?.id === 'ALL'
   const centreName = (id) => centres.find(c => c.id === id)?.name || id
-  const [f, setF] = useState({ customer:'', recipient:'', amount:'', payment_method:'CASH' })
+  const [f, setF] = useState({ customer:'', recipient:'', phone:'', amount:'', payment_method:'CASH' })
   const load = async () => {
     const data = await apiGet(`/gift-cards?centre_id=${centre.id}`)
     setList(Array.isArray(data) ? data : [])
@@ -780,12 +918,13 @@ function GiftCardView({ centre, centres, role, bump, refreshTick }) {
       centre_id: centre.id,
       buyer: f.customer.trim(),
       recipient: f.recipient.trim() || f.customer.trim(),
+      customer_phone: f.phone.trim(),
       price_paise: value,
       value_paise: value,
       payment_method: f.payment_method,
     })
     if (r.error) return toast.error(r.error)
-    toast.success(`Gift card ${r.gift_card.code} sold`); setOpen(false); setF({ customer:'', recipient:'', amount:'', payment_method:'CASH' }); bump(); load()
+    toast.success(`Gift card ${r.gift_card.code} sold`); setOpen(false); setF({ customer:'', recipient:'', phone:'', amount:'', payment_method:'CASH' }); bump(); load()
   }
   return (
     <div className="space-y-4">
@@ -797,6 +936,7 @@ function GiftCardView({ centre, centres, role, bump, refreshTick }) {
             <div className="grid grid-cols-2 gap-3">
               <Field l="Buyer"><Input value={f.customer} onChange={e=>setF({...f, customer:e.target.value})}/></Field>
               <Field l="Recipient"><Input value={f.recipient} onChange={e=>setF({...f, recipient:e.target.value})}/></Field>
+              <Field l="Recipient Mobile"><Input inputMode="tel" value={f.phone} onChange={e=>setF({...f, phone:e.target.value})}/></Field>
               <Field l="Amount (₹)"><Input type="number" value={f.amount} onChange={e=>setF({...f, amount:e.target.value})}/></Field>
               <Field l="Payment"><Select value={f.payment_method} onValueChange={v=>setF({...f, payment_method:v})}><SelectTrigger><SelectValue/></SelectTrigger>
                 <SelectContent>{SALE_PAY_METHODS.map(x=><SelectItem key={x} value={x}>{x.replace('_',' ')}</SelectItem>)}</SelectContent></Select></Field>
