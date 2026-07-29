@@ -87,12 +87,13 @@ const bookingStatus = event => {
   return raw.charAt(0).toUpperCase() + raw.slice(1)
 }
 
-function Delta({ current, previous, suffix='vs previous day' }) {
+function Delta({ current, previous, suffix='vs previous day', compact=false }) {
   const percent = safePercent(current, previous)
-  if (percent == null) return <span className="text-emerald-600">New <span className="text-muted-foreground">{suffix}</span></span>
+  const suffixNode = <span className={`${compact?'hidden sm:inline ':''}text-muted-foreground`}>{suffix}</span>
+  if (percent == null) return <span className="text-emerald-600">New {suffixNode}</span>
   const positive = percent >= 0
   const Icon = positive ? TrendingUp : TrendingDown
-  return <span className={positive?'text-emerald-600':'text-rose-500'}><Icon className="mr-1 inline h-3.5 w-3.5"/>{Math.abs(percent)}% <span className="font-normal text-muted-foreground">{suffix}</span></span>
+  return <span className={positive?'text-emerald-600':'text-rose-500'}><Icon className="mr-1 inline h-3.5 w-3.5"/>{Math.abs(percent)}% <span className="font-normal">{suffixNode}</span></span>
 }
 
 function MissionKpi({ label, value, icon:Icon, tone, current, previous, onClick }) {
@@ -103,12 +104,12 @@ function MissionKpi({ label, value, icon:Icon, tone, current, previous, onClick 
   }
   return (
     <Card role={onClick?'button':undefined} tabIndex={onClick?0:undefined} onClick={onClick} onKeyDown={event=>{ if (onClick && ['Enter',' '].includes(event.key)) { event.preventDefault(); onClick() } }} className={`mission-kpi min-w-0 overflow-hidden border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.07)] transition duration-200 ${onClick?'cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_16px_42px_rgba(76,29,149,0.12)] focus-visible:ring-2 focus-visible:ring-violet-500':''}`}>
-      <CardContent className="flex min-h-[132px] items-center gap-4 p-5 pt-5">
-        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${tones[tone] || tones.violet}`}><Icon className="h-6 w-6"/></div>
+      <CardContent className="flex min-h-[132px] flex-col items-start justify-center gap-2 p-3 pt-3 sm:flex-row sm:items-center sm:gap-4 sm:p-5 sm:pt-5">
+        <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-12 sm:w-12 sm:rounded-2xl ${tones[tone] || tones.violet}`}><Icon className="h-5 w-5 sm:h-6 sm:w-6"/></div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</div>
-          <div className="mt-1 truncate text-2xl font-bold tracking-tight text-slate-950">{value}</div>
-          <div className="mt-2 text-[11px] font-medium"><Delta current={current} previous={previous}/></div>
+          <div className="text-[9px] font-semibold uppercase leading-tight tracking-[0.1em] text-slate-500 sm:text-[11px] sm:tracking-[0.12em]">{label}</div>
+          <div className="mt-1 whitespace-nowrap text-lg font-bold leading-tight tracking-tight text-slate-950 sm:text-2xl">{value}</div>
+          <div className="mt-2 truncate text-[10px] font-medium sm:text-[11px]"><Delta current={current} previous={previous} compact/></div>
         </div>
       </CardContent>
     </Card>
@@ -244,9 +245,9 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
   const currentMonth = aggregateFor(monthly?.rows?.find(row=>row.period===currentMonthKey))
   const previousMonth = aggregateFor(monthly?.rows?.find(row=>row.period===previousMonthKey))
   const monthMetrics = [
-    ['Total Revenue',currentMonth.total_revenue,previousMonth.total_revenue,true], ['Total Bookings',currentMonth.bookings,previousMonth.bookings,false],
-    ['Guests',currentMonth.guests,previousMonth.guests,false], ['Membership Sales',currentMonth.memberships_sold,previousMonth.memberships_sold,false],
-    ['Gift Card Sales',currentMonth.gift_cards_sold,previousMonth.gift_cards_sold,false], ['Expenses',currentMonth.total_expenses,previousMonth.total_expenses,true],
+    ['Total Revenue',currentMonth.total_revenue,previousMonth.total_revenue,true,'total_revenue'], ['Total Bookings',currentMonth.bookings,previousMonth.bookings,false,'bookings'],
+    ['Guests',currentMonth.guests,previousMonth.guests,false,'guests'], ['Memberships Sold',currentMonth.memberships_sold,previousMonth.memberships_sold,false,'memberships_sold'],
+    ['Gift Cards Sold',currentMonth.gift_cards_sold,previousMonth.gift_cards_sold,false,'gift_cards_sold'], ['Expenses',currentMonth.total_expenses,previousMonth.total_expenses,true,'total_expenses'],
   ]
 
   const drill = metric => onDrill?.({type:'metric',metric,centre_id:centreId,date})
@@ -269,7 +270,7 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Notifications" className="h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm"><Bell className="h-4 w-4"/></Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-72"><DropdownMenuLabel>Notifications</DropdownMenuLabel><DropdownMenuSeparator/><div className="px-3 py-5 text-center text-sm text-muted-foreground">No new notifications</div></DropdownMenuContent></DropdownMenu>
           <Button variant="outline" size="icon" aria-label="Toggle full screen" onClick={toggleFullscreen} className="hidden h-11 w-11 rounded-2xl border-white bg-white/90 shadow-sm sm:inline-flex"><Expand className="h-4 w-4"/></Button>
           <DropdownMenu>
-            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="hidden h-11 w-11 rounded-2xl border-white bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm lg:inline-flex"><UserRound className="h-4 w-4"/></Button></DropdownMenuTrigger>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label="Profile menu" className="hidden h-11 w-11 rounded-2xl border-white bg-gradient-to-br from-violet-100 to-indigo-100 text-violet-700 shadow-sm md:inline-flex"><UserRound className="h-4 w-4"/></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64 rounded-xl p-2">
               <DropdownMenuLabel><div className="truncate">{profile?.full_name || profile?.email}</div><div className="mt-1 truncate text-xs font-normal text-muted-foreground">{isSuperAdmin?'Super Admin':'Centre User'} · {centre.name}</div></DropdownMenuLabel>
               <DropdownMenuSeparator/>
@@ -283,11 +284,11 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
         </div>
       </div>
 
-      {loading ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">{Array.from({length:6},(_,index)=><Skeleton key={index} className="h-[132px] rounded-2xl"/>)}</div> : errors.daily ? <Card className="border-rose-100 bg-rose-50/60"><CardContent className="p-5 pt-5 text-sm text-rose-700">{errors.daily} Choose another date or refresh the page.</CardContent></Card> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+      {loading ? <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">{Array.from({length:6},(_,index)=><Skeleton key={index} className="h-[132px] rounded-2xl"/>)}</div> : errors.daily ? <Card className="border-rose-100 bg-rose-50/60"><CardContent className="p-5 pt-5 text-sm text-rose-700">{errors.daily} Choose another date or refresh the page.</CardContent></Card> : <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-3 2xl:grid-cols-6">
         <MissionKpi label="Today's Bookings" value={agg.bookings||0} icon={CalendarDays} tone="violet" current={agg.bookings} previous={previousAgg.bookings} onClick={()=>drill('bookings')}/>
         <MissionKpi label="Today's Revenue" value={formatMoney(agg.total_revenue)} icon={IndianRupee} tone="emerald" current={agg.total_revenue} previous={previousAgg.total_revenue} onClick={()=>drill('total_revenue')}/>
         <MissionKpi label="Cash in Hand" value={formatMoney(agg.closing_cash_expected)} icon={WalletCards} tone="amber" current={agg.closing_cash_expected} previous={previousAgg.closing_cash_expected} onClick={()=>drill('closing_cash_expected')}/>
-        <MissionKpi label="Online Payments" value={formatMoney(online)} icon={CreditCard} tone="blue" current={online} previous={previousOnline}/>
+        <MissionKpi label="Online Payments" value={formatMoney(online)} icon={CreditCard} tone="blue" current={online} previous={previousOnline} onClick={()=>drill('online_sales')}/>
         <MissionKpi label="Guests Today" value={agg.guests||0} icon={UsersRound} tone="indigo" current={agg.guests} previous={previousAgg.guests} onClick={()=>drill('guests')}/>
         <MissionKpi label="Membership Sales" value={formatMoney(agg.membership_sales)} icon={Sparkles} tone="rose" current={agg.membership_sales} previous={previousAgg.membership_sales} onClick={()=>drill('membership_sales')}/>
       </div>}
@@ -303,7 +304,7 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
         <Card className="min-w-0 border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
           <SectionHeading title="Payment Breakdown" subtitle="Fresh collections for the selected business date" control={<Badge variant="secondary" className="rounded-lg bg-violet-50 text-violet-700">Today</Badge>}/>
           <CardContent className="grid min-h-[310px] items-center gap-3 p-4 pt-1 sm:grid-cols-[1fr_1.05fr] sm:p-5 sm:pt-1">
-            {paymentTotal===0 ? <div className="sm:col-span-2"><EmptyCard icon={CreditCard} title="No payment collections" text="Cash, card and UPI collections will appear here."/></div> : <><div className="relative h-[190px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={paymentData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={1.5} stroke="none">{paymentData.map((item,index)=><Cell key={item.name} fill={PAYMENT_COLOURS[index]}/>)}</Pie><ChartTooltip formatter={value=>formatMoney(value)}/></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><strong className="text-lg text-slate-950">{formatMoney(paymentTotal)}</strong><span className="text-[10px] uppercase tracking-wider text-slate-500">Collected</span></div></div><div className="space-y-3">{paymentData.map((item,index)=>{const percent=paymentTotal?Math.round(item.value/paymentTotal*100):0;return <div key={item.name} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-xs"><span className="h-2.5 w-2.5 rounded-full" style={{backgroundColor:PAYMENT_COLOURS[index]}}/><span className="text-slate-600">{item.name}</span><span className="text-right"><strong className="text-slate-900">{formatMoney(item.value)}</strong><span className="ml-2 text-slate-400">{percent}%</span></span></div>})}</div></>}
+            {paymentTotal===0 ? <div className="sm:col-span-2"><EmptyCard icon={CreditCard} title="No payment collections" text="Cash, card and UPI collections will appear here."/></div> : <><div className="relative h-[190px]"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={paymentData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={82} paddingAngle={1.5} stroke="none">{paymentData.map((item,index)=><Cell key={item.name} fill={PAYMENT_COLOURS[index]}/>)}</Pie><ChartTooltip formatter={value=>formatMoney(value)}/></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center"><strong className="text-lg text-slate-950">{formatMoney(paymentTotal)}</strong><span className="text-[10px] uppercase tracking-wider text-slate-500">Collected</span></div></div><div className="space-y-2">{paymentData.map((item,index)=>{const percent=paymentTotal?Math.round(item.value/paymentTotal*100):0;return <button type="button" key={item.name} onClick={()=>drill(item.metric)} className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg p-1.5 text-left text-xs transition hover:bg-violet-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"><span className="h-2.5 w-2.5 rounded-full" style={{backgroundColor:PAYMENT_COLOURS[index]}}/><span className="text-slate-600">{item.name}</span><span className="text-right"><strong className="text-slate-900">{formatMoney(item.value)}</strong><span className="ml-2 text-slate-400">{percent}%</span></span></button>})}</div></>}
           </CardContent>
         </Card>
       </div>
@@ -333,8 +334,8 @@ export function DashboardMissionControl({ centre, profile, refreshTick, onDrill,
 
       <Card className="min-w-0 overflow-hidden border-white/80 bg-white/90 shadow-[0_12px_35px_rgba(49,46,129,0.06)]">
         <SectionHeading title={`Monthly Snapshot · ${new Intl.DateTimeFormat('en-IN',{month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(`${date.slice(0,7)}-01T00:00:00Z`))}`} subtitle="Verified totals from the existing reporting engine"/>
-        <CardContent className="grid gap-px bg-slate-100 p-0 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          {errors.monthly ? <div className="col-span-full bg-white p-8 text-center text-sm text-slate-500">{errors.monthly}</div> : monthMetrics.map(([label,current,previous,isMoney],index)=><div key={label} className="bg-white p-5"><div className="text-[10px] font-semibold uppercase tracking-[0.11em] text-slate-500">{label}</div><div className="mt-2 text-xl font-bold text-slate-950">{isMoney?formatMoney(current):Number(current||0).toLocaleString('en-IN')}</div><div className="mt-2 text-[11px] font-medium"><Delta current={current} previous={previous} suffix="vs last month"/></div><div className="mt-4 h-7"><ResponsiveContainer width="100%" height="100%"><AreaChart data={[{period:'Previous',value:Number(previous||0)},{period:'Current',value:Number(current||0)}]}><defs><linearGradient id={`snapshot-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0.25}/><stop offset="95%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0}/></linearGradient></defs><Area type="monotone" dataKey="value" stroke={index===5?'#f43f5e':'#8b5cf6'} fill={`url(#snapshot-${index})`} strokeWidth={2} dot={false}/></AreaChart></ResponsiveContainer></div></div>)}
+        <CardContent className="grid grid-cols-2 gap-px bg-slate-100 p-0 xl:grid-cols-3 2xl:grid-cols-6">
+          {errors.monthly ? <div className="col-span-full bg-white p-8 text-center text-sm text-slate-500">{errors.monthly}</div> : monthMetrics.map(([label,current,previous,isMoney,metric],index)=><button type="button" key={label} onClick={()=>onDrill?.({type:'metric',metric,centre_id:centreId,from:monthStart(date),to:monthEnd(date)})} className="bg-white p-3 text-left transition hover:bg-violet-50/40 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 sm:p-5"><div className="text-[9px] font-semibold uppercase tracking-[0.09em] text-slate-500 sm:text-[10px] sm:tracking-[0.11em]">{label}</div><div className="mt-2 text-lg font-bold text-slate-950 sm:text-xl">{isMoney?formatMoney(current):Number(current||0).toLocaleString('en-IN')}</div><div className="mt-2 text-[10px] font-medium sm:text-[11px]"><Delta current={current} previous={previous} suffix="vs last month" compact/></div><div className="mt-4 h-7"><ResponsiveContainer width="100%" height="100%"><AreaChart data={[{period:'Previous',value:Number(previous||0)},{period:'Current',value:Number(current||0)}]}><defs><linearGradient id={`snapshot-${index}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0.25}/><stop offset="95%" stopColor={index===5?'#f43f5e':'#8b5cf6'} stopOpacity={0}/></linearGradient></defs><Area type="monotone" dataKey="value" stroke={index===5?'#f43f5e':'#8b5cf6'} fill={`url(#snapshot-${index})`} strokeWidth={2} dot={false}/></AreaChart></ResponsiveContainer></div></button>)}
         </CardContent>
       </Card>
     </div>

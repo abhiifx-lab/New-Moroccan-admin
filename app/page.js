@@ -21,7 +21,7 @@ import {
   LayoutDashboard, CalendarCheck2, CreditCard, Gift, Receipt, ArrowLeftRight,
   BookOpen, Wallet, Lock, ShieldCheck, Building2, Sparkles, RefreshCw, Plus, ChevronRight,
   Search, ArrowLeft, Undo2, AlertTriangle, Clock, User2, MapPin, FileText, Users, LogOut, Key,
-  Download, FileSpreadsheet, Menu, Trash2, Settings
+  Download, FileSpreadsheet, Menu, Trash2, Settings, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react'
 
 const DashboardMissionControl = dynamic(
@@ -104,7 +104,6 @@ const NAV = [
   { id: 'close',       label: 'Business Day',    icon: Lock },
   { id: 'reports',     label: 'Reports',         icon: FileText },
   { id: 'therapists',  label: 'Therapists',      icon: User2 },
-  { id: 'audit',       label: 'Audit Log',       icon: ShieldCheck },
 ]
 
 const SALE_PAY_METHODS = ['CASH','UPI_1','UPI_2','CARD']
@@ -2017,7 +2016,7 @@ function SettingsView({ profile, centre, onNavigate }) {
   )
 }
 
-function NavigationPanel({ profile, centre, centres, navItems, view, setView, setCentre, onNavigate }) {
+function NavigationPanel({ profile, centre, centres, navItems, view, setView, setCentre, onNavigate, collapsed=false, onToggle }) {
   const navigate = (nextView) => {
     setView(nextView)
     onNavigate?.()
@@ -2025,28 +2024,30 @@ function NavigationPanel({ profile, centre, centres, navItems, view, setView, se
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-3 px-2 py-2">
+      <div className={`flex px-2 py-2 ${collapsed?'flex-col items-center gap-2':'items-center gap-3'}`}>
         <div className="h-10 w-10 shrink-0 overflow-hidden rounded-xl shadow-md shadow-amber-500/15">
           <img src="/logo.png" alt="Moroccan Spa" className="h-full w-full object-cover" />
         </div>
-        <div className="min-w-0">
+        {!collapsed && <div className="min-w-0">
           <div className="truncate font-semibold tracking-tight">Moroccan Spa</div>
           <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Business OS</div>
-        </div>
+        </div>}
+        {onToggle && <Button variant="ghost" size="icon" onClick={onToggle} aria-label={collapsed?'Expand sidebar':'Collapse sidebar'} title={collapsed?'Expand sidebar':'Collapse sidebar'} className={`${collapsed?'':'ml-auto'} h-9 w-9 shrink-0 text-muted-foreground`}>
+          {collapsed?<PanelLeftOpen className="h-4 w-4"/>:<PanelLeftClose className="h-4 w-4"/>}
+        </Button>}
       </div>
 
-      <div className="mt-4 rounded-xl border border-border/60 bg-muted/35 p-3">
-        <div className="min-w-0">
-          <div className="truncate text-xs font-semibold text-foreground">{profile.full_name || profile.email}</div>
-          <Badge className="mt-1 border border-amber-500/30 bg-amber-500/15 px-1.5 py-0 font-mono text-[10px] text-amber-700 hover:bg-amber-500/15 dark:text-amber-300">
-            {profile.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : 'CENTRE USER'}
-          </Badge>
-        </div>
-      </div>
-
-      <div className="mt-4 space-y-1.5">
-        <Label className="px-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Centre Scope</Label>
-        {profile.role === 'SUPER_ADMIN' ? (
+      <div className={`${collapsed?'mt-3':'mt-4'} space-y-1.5`}>
+        {!collapsed && <Label className="px-2 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">Centre Scope</Label>}
+        {collapsed && profile.role === 'SUPER_ADMIN' ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="icon" aria-label={`Change centre. Current centre: ${centre.name}`} title={centre.name} className="mx-auto flex border-amber-500/25 bg-amber-500/10 text-amber-700"><Building2 className="h-4 w-4"/></Button></DropdownMenuTrigger>
+            <DropdownMenuContent side="right" align="start" className="w-64">
+              <DropdownMenuItem onClick={()=>setCentre(ALL_CENTRES)} className={centre.id === 'ALL' ? 'bg-muted font-semibold' : ''}><Building2 className="mr-2 h-4 w-4 text-amber-500"/>All Centres (Collective)</DropdownMenuItem>
+              {centres.map(c=><DropdownMenuItem key={c.id} onClick={()=>setCentre(c)} className={centre.id === c.id ? 'bg-muted font-semibold' : ''}><MapPin className="mr-2 h-4 w-4 text-amber-500"/>{c.name}</DropdownMenuItem>)}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : profile.role === 'SUPER_ADMIN' ? (
           <Select value={centre.id} onValueChange={value=>{ setCentre(value === 'ALL' ? ALL_CENTRES : centres.find(c=>c.id===value)); onNavigate?.() }}>
             <SelectTrigger className="bg-background/70"><SelectValue/></SelectTrigger>
             <SelectContent>
@@ -2055,26 +2056,26 @@ function NavigationPanel({ profile, centre, centres, navItems, view, setView, se
             </SelectContent>
           </Select>
         ) : (
-          <div className="flex min-h-10 items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-200">
-            <Building2 className="h-4 w-4 shrink-0 text-amber-500"/><span className="truncate">{centre.name}</span>
+          <div title={centre.name} className={`flex min-h-10 items-center rounded-lg border border-amber-500/25 bg-amber-500/10 text-sm font-medium text-amber-800 dark:text-amber-200 ${collapsed?'mx-auto w-10 justify-center p-2':'gap-2 px-3 py-2'}`}>
+            <Building2 className="h-4 w-4 shrink-0 text-amber-500"/>{!collapsed && <span className="truncate">{centre.name}</span>}
           </div>
         )}
       </div>
 
-      <nav aria-label="Primary navigation" className="app-nav-scroll mt-5 flex-1 space-y-1 overflow-y-auto pr-1">
+      <nav aria-label="Primary navigation" className={`app-nav-scroll mt-5 flex-1 space-y-1 overflow-y-auto ${collapsed?'':'pr-1'}`}>
         {navItems.map(item => {
           const active = view === item.id
           const NavIcon = item.icon
           return (
-            <button key={item.id} type="button" aria-current={active?'page':undefined} onClick={()=>navigate(item.id)}
-              className={`flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition-all ${active?'bg-primary text-primary-foreground shadow-sm':'text-foreground/75 hover:bg-muted hover:text-foreground'}`}>
-              <NavIcon className="h-4 w-4 shrink-0"/><span className="truncate">{item.label}</span>
-              {active && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70"/>}
+            <button key={item.id} type="button" title={collapsed?item.label:undefined} aria-label={collapsed?item.label:undefined} aria-current={active?'page':undefined} onClick={()=>navigate(item.id)}
+              className={`flex min-h-11 w-full items-center rounded-lg py-2.5 text-left text-sm font-medium transition-all ${collapsed?'justify-center px-2':'gap-3 px-3'} ${active?'bg-primary text-primary-foreground shadow-sm':'text-foreground/75 hover:bg-muted hover:text-foreground'}`}>
+              <NavIcon className="h-4 w-4 shrink-0"/>{!collapsed && <span className="truncate">{item.label}</span>}
+              {active && !collapsed && <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 opacity-70"/>}
             </button>
           )
         })}
       </nav>
-      <div className="mt-3 border-t border-border/50 px-2 py-3 text-[10px] text-muted-foreground">One transaction • One source • Infinite reports</div>
+      {!collapsed && <div className="mt-3 border-t border-border/50 px-2 py-3 text-[10px] text-muted-foreground">One transaction • One source • Infinite reports</div>}
     </div>
   )
 }
@@ -2090,6 +2091,7 @@ function App() {
   const [centre, setCentre] = useState(null)
   const [view, setView] = useState('dashboard')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [pendingAction, setPendingAction] = useState(null)
   const [bump, setBump] = useState(0)
   const [drillCtx, setDrillCtx] = useState(null)
@@ -2144,10 +2146,7 @@ function App() {
   if (!centre) return <div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading approved centres…</div>
 
   const role = profile.role === 'SUPER_ADMIN' ? 'SUPER' : 'MANAGER'
-  const navItems = [
-    ...NAV,
-    ...(profile.role === 'SUPER_ADMIN' ? [{ id: 'users', label: 'User Management', icon: Users }] : [])
-  ]
+  const navItems = NAV
 
   const handleLogout = async () => {
     await apiPost('/auth/logout', {})
@@ -2156,7 +2155,12 @@ function App() {
     setProfile(null)
     toast.info('Logged out from Moroccan Spa Business OS')
   }
-  const currentView = navItems.find(n=>n.id===view) || (view === 'settings' ? { id:'settings', label:'Settings', icon:Settings } : { id:view, label:'Dashboard', icon:LayoutDashboard })
+  const auxiliaryViews = {
+    settings:{ id:'settings', label:'Settings', icon:Settings },
+    audit:{ id:'audit', label:'Audit Log', icon:ShieldCheck },
+    users:{ id:'users', label:'User Management', icon:Users },
+  }
+  const currentView = navItems.find(n=>n.id===view) || auxiliaryViews[view] || { id:view, label:'Dashboard', icon:LayoutDashboard }
   const Icon = currentView.icon
   const handleDashboardAction = (action) => {
     const target = {
@@ -2182,9 +2186,9 @@ function App() {
   return (
     <div className="app-shell bg-gradient-to-br from-background via-background to-muted/35">
       <Toaster theme="system" position="top-right" richColors closeButton />
-      <div className="flex min-h-[100dvh] lg:h-[100dvh]">
-        <aside className="hidden h-[100dvh] w-64 shrink-0 border-r border-border/60 bg-card/70 p-4 backdrop-blur-xl lg:sticky lg:top-0 lg:flex lg:flex-col">
-          <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }}/>
+      <div className="flex min-h-[100dvh] md:h-[100dvh]">
+        <aside className={`hidden h-[100dvh] shrink-0 border-r border-border/60 bg-card/70 backdrop-blur-xl transition-[width,padding] duration-200 md:sticky md:top-0 md:flex md:flex-col ${sidebarCollapsed?'w-20 p-3':'w-64 p-4'}`}>
+          <NavigationPanel {...{ profile, centre, centres, navItems, view, setView, setCentre }} collapsed={sidebarCollapsed} onToggle={()=>setSidebarCollapsed(value=>!value)}/>
         </aside>
 
         <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
@@ -2194,8 +2198,8 @@ function App() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex min-w-0 flex-1 flex-col lg:h-[100dvh]">
-          <header className="safe-top sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-xl lg:hidden">
+        <div className="flex min-w-0 flex-1 flex-col md:h-[100dvh]">
+          <header className="safe-top sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-xl md:hidden">
             <div className="flex h-16 items-center gap-3 px-4">
               <Button variant="ghost" size="icon" aria-label="Open navigation" onClick={()=>setMobileNavOpen(true)} className="shrink-0"><Menu className="h-5 w-5"/></Button>
               <div className="min-w-0 flex-1">
@@ -2219,7 +2223,7 @@ function App() {
 
           <main id="main-content" className="app-content min-w-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-7" tabIndex={-1}>
             <div className="mx-auto w-full max-w-[1600px]">
-              <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground lg:flex">
+              <div className="mb-6 hidden items-center gap-2 border-b border-border/40 pb-3 text-sm text-muted-foreground md:flex">
                 <Icon className="h-4 w-4 text-amber-500"/>
                 <span className="font-semibold text-foreground">{currentView.label}</span>
                 <span className="mx-1.5 text-border">/</span>
